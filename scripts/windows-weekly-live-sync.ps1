@@ -1,7 +1,17 @@
 $ErrorActionPreference = "Stop"
 
 $AppRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$LogDir = Join-Path $AppRoot "logs"
+$EnvPath = Join-Path $AppRoot ".env"
+if (Test-Path $EnvPath) {
+  Get-Content $EnvPath | ForEach-Object {
+    $Line = $_.Trim()
+    if (-not $Line -or $Line.StartsWith("#") -or -not $Line.Contains("=")) { return }
+    $Parts = $Line.Split("=", 2)
+    [Environment]::SetEnvironmentVariable($Parts[0].Trim(), $Parts[1].Trim().Trim('"').Trim("'"), "Process")
+  }
+}
+
+$LogDir = if ($env:SYNC_LOG_DIR) { $env:SYNC_LOG_DIR } else { Join-Path $AppRoot "logs" }
 $Stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $LogFile = Join-Path $LogDir "weekly-live-sync-$Stamp.log"
 
