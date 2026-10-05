@@ -9,7 +9,7 @@
     "dev": "node server.js",
     "export:master": "node scripts/export-master-workbook.mjs",
     "sync:live": "node scripts/sync-live-database.mjs",
-    "sync:install-weekly": "node scripts/install-weekly-live-sync.mjs"
+    "sync:install-weekly-mac": "node scripts/install-weekly-live-sync.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1",
