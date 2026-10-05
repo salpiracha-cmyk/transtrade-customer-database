@@ -267,6 +267,36 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/admin/restore-database") {
+    const contentType = req.headers["content-type"] || "";
+    if (!contentType.includes("multipart/form-data")) return sendJson(res, 400, { error: "Use multipart/form-data" });
+    const upload = await readMultipart(req, contentType);
+    const file = upload.files.file;
+    if (!file) return sendJson(res, 400, { error: "Missing file field" });
+    const restored = JSON.parse(file.data.toString("utf8"));
+    if (!Array.isArray(restored.customers)) return sendJson(res, 400, { error: "Database file must include a customers array" });
+    restored.imports ||= [];
+    restored.events ||= [];
+    restored.suppressions ||= [];
+    restored.campaigns ||= [];
+    restored.ignoredDuplicates ||= [];
+    const backupName = `database.backup-before-live-restore-${Date.now()}.json`;
+    const backupPath = path.join(path.dirname(DB_PATH), backupName);
+    if (fssync.existsSync(DB_PATH)) await fs.copyFile(DB_PATH, backupPath);
+    restored.events.push(event("database_restored", "admin", {
+      filename: file.filename,
+      customers: restored.customers.length,
+      backup: backupName
+    }));
+    await writeDb(restored);
+    sendJson(res, 200, {
+      restored: true,
+      customers: restored.customers.length,
+      backup: backupName
+    });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/cards/extract") {
     const body = await readJson(req);
     const filename = path.basename(String(body.path || body.filename || ""));
