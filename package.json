@@ -6,7 +6,10 @@
   "scripts": {
     "build": "node -e \"console.log('No build step needed for this Node app')\"",
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "export:master": "node scripts/export-master-workbook.mjs",
+    "sync:live": "node scripts/sync-live-database.mjs",
+    "sync:install-weekly": "node scripts/install-weekly-live-sync.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1",

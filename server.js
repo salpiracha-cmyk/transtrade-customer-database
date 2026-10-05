@@ -396,23 +396,43 @@ async function handleApi(req, res, url) {
     if (!file) return sendJson(res, 400, { error: "Missing file field" });
     const restored = JSON.parse(file.data.toString("utf8"));
     if (!Array.isArray(restored.customers)) return sendJson(res, 400, { error: "Database file must include a customers array" });
-    restored.imports ||= [];
-    restored.events ||= [];
-    restored.suppressions ||= [];
-    restored.campaigns ||= [];
-    restored.ignoredDuplicates ||= [];
+    const restoreMode = upload.fields.mode || url.searchParams.get("mode") || "full";
+    const current = await readDb();
+    const nextDb = restoreMode === "customers"
+      ? {
+          ...current,
+          customers: restored.customers || [],
+          imports: restored.imports || [],
+          ignoredDuplicates: restored.ignoredDuplicates || current.ignoredDuplicates || []
+        }
+      : {
+          customers: restored.customers || [],
+          imports: restored.imports || [],
+          events: restored.events || [],
+          suppressions: restored.suppressions || [],
+          campaigns: restored.campaigns || [],
+          ignoredDuplicates: restored.ignoredDuplicates || []
+        };
+    nextDb.events ||= [];
+    nextDb.suppressions ||= [];
+    nextDb.campaigns ||= [];
+    nextDb.ignoredDuplicates ||= [];
     const backupName = `database.backup-before-live-restore-${Date.now()}.json`;
     const backupPath = path.join(path.dirname(DB_PATH), backupName);
     if (fssync.existsSync(DB_PATH)) await fs.copyFile(DB_PATH, backupPath);
-    restored.events.push(event("database_restored", "admin", {
+    nextDb.events.push(event("database_restored", "admin", {
       filename: file.filename,
-      customers: restored.customers.length,
-      backup: backupName
+      customers: nextDb.customers.length,
+      backup: backupName,
+      mode: restoreMode
     }));
-    await writeDb(restored);
+    await writeDb(nextDb);
     sendJson(res, 200, {
       restored: true,
-      customers: restored.customers.length,
+      mode: restoreMode,
+      customers: nextDb.customers.length,
+      suppressions: nextDb.suppressions.length,
+      campaigns: nextDb.campaigns.length,
       backup: backupName
     });
     return;
