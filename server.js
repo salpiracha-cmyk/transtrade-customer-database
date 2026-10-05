@@ -12,7 +12,7 @@ import { xml2js } from "xml-js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 loadLocalEnv(path.join(__dirname, ".env"));
-const PORT = Number(process.env.PORT || 4177);
+const PORT = Number(process.env.PORT || 3000);
 const DB_PATH = path.join(__dirname, "data", "database.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const IMPORT_DIR = path.join(__dirname, "imports");
