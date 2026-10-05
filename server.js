@@ -76,30 +76,37 @@ const COLUMN_ALIASES = {
   sourcePhoto: ["photo", "source photo", "source image"]
 };
 
-await ensureDirs();
-await ensureDb();
-
-const server = http.createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    if (APP_PASSWORD && !isAuthorized(req)) {
-      requestAuth(res);
-      return;
-    }
-    if (url.pathname.startsWith("/api/")) {
-      await handleApi(req, res, url);
-      return;
-    }
-    await serveStatic(req, res, url);
-  } catch (error) {
-    console.error(error);
-    sendJson(res, 500, { error: "Server error", detail: String(error.message || error) });
-  }
+startServer().catch((error) => {
+  console.error("Failed to start Transtrade Customer Database", error);
+  process.exit(1);
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Transtrade Customer Database running at http://${HOST}:${PORT}`);
-});
+async function startServer() {
+  await ensureDirs();
+  await ensureDb();
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (APP_PASSWORD && !isAuthorized(req)) {
+        requestAuth(res);
+        return;
+      }
+      if (url.pathname.startsWith("/api/")) {
+        await handleApi(req, res, url);
+        return;
+      }
+      await serveStatic(req, res, url);
+    } catch (error) {
+      console.error(error);
+      sendJson(res, 500, { error: "Server error", detail: String(error.message || error) });
+    }
+  });
+
+  server.listen(PORT, HOST, () => {
+    console.log(`Transtrade Customer Database running at http://${HOST}:${PORT}`);
+  });
+}
 
 function isAuthorized(req) {
   const header = req.headers.authorization || "";
