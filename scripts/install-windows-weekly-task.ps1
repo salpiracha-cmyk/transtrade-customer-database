@@ -13,7 +13,7 @@ $Action = New-ScheduledTaskAction `
   -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Runner`"" `
   -WorkingDirectory $AppRoot
 
-$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 9:00AM
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 3:30PM
 $Settings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
   -AllowStartIfOnBatteries `
@@ -29,6 +29,6 @@ Register-ScheduledTask `
   -Force | Out-Null
 
 Write-Host "Installed Windows Task Scheduler job: $TaskName"
-Write-Host "Schedule: every Monday at 9:00 AM"
+Write-Host "Schedule: every Monday at 3:30 PM"
 Write-Host "App folder: $AppRoot"
 Write-Host "Runner: $Runner"
