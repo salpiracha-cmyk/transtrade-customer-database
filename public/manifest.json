@@ -1,0 +1,9 @@
+{
+  "name": "Transtrade Customer Database",
+  "short_name": "TTI Customers",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#17324d",
+  "icons": []
+}

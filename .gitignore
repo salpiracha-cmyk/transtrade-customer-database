@@ -1,0 +1,16 @@
+.env
+.DS_Store
+node_modules/
+npm-debug.log*
+
+# Private/live business data stays off GitHub.
+data/*.json
+imports/*
+uploads/cards/*
+
+# Keep folder structure.
+!data/.gitkeep
+!imports/.gitkeep
+!uploads/
+!uploads/cards/
+!uploads/cards/.gitkeep

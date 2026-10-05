@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#17324d" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>Transtrade Customer Database</title>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">TTI</div>
+        <div>
+          <strong>Customer Database</strong>
+          <span>Buyer lists and card archive</span>
+        </div>
+      </div>
+      <nav>
+        <button class="nav active" data-view="dashboard">Dashboard</button>
+        <button class="nav" data-view="customers">Customers</button>
+        <button class="nav" data-view="companyContacts">Miscellaneous</button>
+        <button class="nav" data-view="research">Research Needed</button>
+        <button class="nav" data-view="exports">Clean Exports</button>
+        <button class="nav" data-view="import">Import</button>
+        <button class="nav" data-view="duplicates">Duplicates</button>
+        <button class="nav" data-view="cards">Cards</button>
+        <button class="nav" data-view="outreach">Outreach</button>
+      </nav>
+    </aside>
+
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <h1 id="viewTitle">Dashboard</h1>
+          <p id="viewSubtitle">Local-first customer database foundation</p>
+        </div>
+        <div class="actions">
+          <button id="addMainBtn" class="button">+ Add card</button>
+          <button id="exportViewBtn" class="button secondary">Clean exports</button>
+        </div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <section class="panel dashboardSearchPanel">
+          <div class="panelHeader">
+            <div>
+              <h2>Quick Search</h2>
+              <p class="hint inlineHint">Search buyer name, person, phone, email, country, or company.</p>
+            </div>
+          </div>
+          <input id="dashboardSearchInput" placeholder="Search customers" />
+          <div id="dashboardSearchSummary" class="hint"></div>
+          <div class="tableWrap dashboardSearchResults">
+            <table>
+              <thead>
+                <tr><th>Company</th><th>Country</th><th>Person</th><th>Mobile</th><th>Email</th><th>Source</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody id="dashboardSearchRows"></tbody>
+            </table>
+          </div>
+        </section>
+        <div class="metricGrid">
+          <div class="metric"><span>Active customers</span><strong id="mActive">0</strong></div>
+          <div class="metric"><span>Clean records</span><strong id="mClean">0</strong></div>
+          <div class="metric"><span>Email ready</span><strong id="mEmailReady">0</strong></div>
+          <div class="metric"><span>Research needed</span><strong id="mResearch">0</strong></div>
+          <div class="metric"><span>Duplicate groups</span><strong id="mDuplicates">0</strong></div>
+        </div>
+        <div class="panelGrid">
+          <section class="panel">
+            <h2>Recent Imports</h2>
+            <div id="recentImports" class="stack"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="customers" class="view">
+        <div class="toolbar">
+          <input id="searchInput" placeholder="Search company, person, email, mobile" />
+          <select id="countryFilter"><option value="">All countries</option></select>
+          <select id="statusFilter">
+            <option value="">All statuses</option>
+            <option value="ready">Ready</option>
+            <option value="missing_email">Missing email</option>
+            <option value="missing_mobile">Missing mobile</option>
+            <option value="incomplete">Incomplete</option>
+            <option value="needs_review">Needs review</option>
+          </select>
+          <select id="qualityFilter">
+            <option value="">All quality</option>
+            <option value="clean">Clean</option>
+            <option value="phone_only">Phone only</option>
+            <option value="email_only">Email only</option>
+            <option value="research_needed">Research needed</option>
+          </select>
+          <select id="contactFilter">
+            <option value="">All contact types</option>
+            <option value="email">Has email</option>
+            <option value="mobile">Has mobile</option>
+            <option value="any_phone">Has phone/mobile</option>
+            <option value="no_contact">No email or phone</option>
+          </select>
+          <select id="sourceFilter">
+            <option value="">All sources</option>
+            <option value="verified_country_workbook">Verified workbook</option>
+            <option value="clean_excel">Clean Excel</option>
+            <option value="archive_buyer_list">Archive buyer list</option>
+            <option value="card_master">Card master</option>
+            <option value="manual">Manual</option>
+          </select>
+          <button id="newCustomerBtn" class="button">+ Add card</button>
+        </div>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr><th>Company</th><th>Country</th><th>Person</th><th>Mobile</th><th>Email</th><th>Source</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="customerRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="exports" class="view">
+        <div class="exportGrid">
+          <section class="panel">
+            <h2>Working Outreach Lists</h2>
+            <div class="exportActions">
+              <a class="exportCard" href="/api/export.xlsx?quality=clean&category=buyer">
+                <strong>Clean master Excel</strong>
+                <span>Best buyer list for outreach preparation. Miscellaneous excluded.</span>
+              </a>
+              <a class="exportCard" href="/api/export.xlsx?contact=email&category=buyer">
+                <strong>Email-ready Excel</strong>
+                <span>Buyer records with email. Miscellaneous excluded.</span>
+              </a>
+              <a class="exportCard" href="/api/export.xlsx?contact=any_phone&category=buyer">
+                <strong>Phone-ready Excel</strong>
+                <span>Buyer records with mobile or office phone.</span>
+              </a>
+              <a class="exportCard" href="/api/export.vcf?contact=mobile&category=buyer">
+                <strong>Mobile phonebook file</strong>
+                <span>VCF for buyer contacts with mobile numbers.</span>
+              </a>
+            </div>
+          </section>
+          <section class="panel">
+            <h2>Cleanup Lists</h2>
+            <div class="exportActions">
+              <a class="exportCard" href="/api/export.xlsx?quality=research_needed&category=buyer">
+                <strong>Research needed Excel</strong>
+                <span>Buyer records missing usable contact route or core details.</span>
+              </a>
+              <a class="exportCard" href="/api/export.xlsx?contact=no_contact&category=buyer">
+                <strong>No-contact Excel</strong>
+                <span>Buyer records with no email, mobile, or phone.</span>
+              </a>
+              <a class="exportCard" href="/api/export.xlsx?sourceType=archive_buyer_list&contact=email&category=buyer">
+                <strong>Archive email list</strong>
+                <span>Archive buyer records that already have emails.</span>
+              </a>
+              <a class="exportCard" href="/api/export.xlsx">
+                <strong>Full active master</strong>
+                <span>Everything active, including messy archive rows.</span>
+              </a>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="companyContacts" class="view">
+        <section class="panel">
+          <div class="panelHeader">
+            <div>
+              <h2>Miscellaneous</h2>
+              <p class="hint inlineHint">Banks, inspection companies, chambers, ministries, taxi, hotels, cargo, and other non-buyer contacts. These are excluded from outreach exports.</p>
+            </div>
+            <div class="toolbar compact">
+              <input id="companyContactSearch" placeholder="Search miscellaneous contacts" />
+              <button id="reloadCompanyContactsBtn" class="button secondary">Reload</button>
+            </div>
+          </div>
+          <div id="companyContactsSummary" class="statusBox"></div>
+          <div id="companyContactGroups" class="stack"></div>
+        </section>
+      </section>
+
+      <section id="research" class="view">
+        <section class="panel">
+          <div class="panelHeader">
+            <div>
+              <h2>Research Needed</h2>
+              <p class="hint inlineHint">Fix incomplete records here. Add an email, mobile, phone, company, or country to move a record back toward the clean lists.</p>
+            </div>
+            <div class="toolbar compact">
+              <input id="researchSearch" placeholder="Search company, country, person" />
+              <select id="researchSourceFilter">
+                <option value="">All sources</option>
+              </select>
+              <a class="button secondary" href="/api/export.xlsx?quality=research_needed&category=buyer">Export</a>
+              <button id="reloadResearchBtn" class="button secondary">Reload</button>
+            </div>
+          </div>
+          <div id="researchSummary" class="statusBox"></div>
+          <div id="researchRows" class="researchGrid"></div>
+        </section>
+      </section>
+
+      <section id="import" class="view">
+        <section class="panel narrow">
+          <h2>Import Excel or CSV</h2>
+          <form id="importForm" class="form">
+            <label>File <input name="file" type="file" accept=".xlsx,.csv" required /></label>
+            <label>Source type
+              <select name="sourceType">
+                <option value="clean_excel">Clean Excel list</option>
+                <option value="verified_country_workbook">Verified country workbook</option>
+                <option value="card_master">TTI card master</option>
+                <option value="manual">Manual batch</option>
+              </select>
+            </label>
+            <label>Import mode
+              <select name="importMode">
+                <option value="generic">Generic buyer list</option>
+                <option value="tti_card_master">TTI Sales Master card database</option>
+              </select>
+            </label>
+            <label>Country fallback <input name="country" placeholder="Optional if file has no country column" /></label>
+            <button class="button" type="submit">Import file</button>
+          </form>
+          <p class="hint">Clean Excel imports have the highest trust. TTI card master imports are kept as historical card-derived contacts until verified.</p>
+        </section>
+      </section>
+
+      <section id="duplicates" class="view">
+        <section class="panel">
+          <div class="panelHeader">
+            <div>
+              <h2>Duplicate Cleanup Workspace</h2>
+              <p class="hint inlineHint">Review each group, keep the best row, and archive repeated rows after merge.</p>
+            </div>
+            <div class="toolbar compact">
+              <select id="duplicateTypeFilter">
+                <option value="all">All matches</option>
+                <option value="email">Same email</option>
+                <option value="mobile">Same mobile</option>
+                <option value="phone">Same phone</option>
+                <option value="website">Same website</option>
+                <option value="company">Same company/country</option>
+              </select>
+              <button id="reloadDuplicatesBtn" class="button secondary">Reload</button>
+            </div>
+          </div>
+          <div id="duplicateSummary" class="statusBox"></div>
+          <div id="duplicateGroups" class="stack"></div>
+        </section>
+      </section>
+
+      <section id="cards" class="view">
+        <section class="panel">
+          <h2>Card Photo Intake</h2>
+          <form id="cardForm" class="form">
+            <input id="cardFileInput" class="visuallyHidden" name="file" type="file" accept="image/*" capture="environment" />
+            <div class="photoActions">
+              <button class="button filePickButton" type="button" data-input="cardFileInput" data-mode="camera">Take photo</button>
+              <button class="button secondary filePickButton" type="button" data-input="cardFileInput" data-mode="library">Choose image</button>
+            </div>
+            <p id="cardFileName" class="hint selectedFile">No card photo selected.</p>
+            <button id="readCardBtn" class="button hidden" type="submit">Read card</button>
+          </form>
+          <p id="cardAiStatus" class="hint">Checking free local AI...</p>
+          <p class="hint">Phone camera uploads the card to this server PC. Free local AI/OCR reads it where available, then you review before saving.</p>
+          <section id="ocrReview" class="ocrReview hidden">
+            <div class="panelHeader">
+              <div>
+                <h2>Review OCR Result</h2>
+                <p id="ocrStatus" class="hint inlineHint"></p>
+              </div>
+              <button id="autoFillCardBtn" class="button secondary" type="button">Auto-fill fields</button>
+            </div>
+            <form id="ocrCustomerForm" class="form">
+              <input name="sourcePhoto" type="hidden" />
+              <div class="ocrLayout">
+                <div class="ocrPreview">
+                  <img id="ocrCardImage" class="cardPreviewImage hidden" alt="Uploaded card preview" />
+                  <pre id="ocrRawText" class="ocrText"></pre>
+                </div>
+                <div class="ocrFields">
+                  <input name="company" placeholder="Company" />
+                  <input name="person" placeholder="Person" />
+                  <input name="role" placeholder="Role" />
+                  <div class="split">
+                    <input name="country" placeholder="Country" />
+                    <input name="city" placeholder="City" />
+                  </div>
+                  <div class="split">
+                    <input name="mobile" placeholder="Mobile / WhatsApp" />
+                    <input name="phone" placeholder="Phone / Office" />
+                  </div>
+                  <input name="email" placeholder="Email" />
+                  <input name="website" placeholder="Website" />
+                  <textarea name="address" placeholder="Address"></textarea>
+                  <textarea name="notes" placeholder="Notes / OCR text"></textarea>
+                  <div class="dialogActions">
+                    <button id="discardOcrBtn" class="button secondary" type="button">Discard</button>
+                    <button id="savePhoneContactBtn" class="button secondary" type="button">Save to phone</button>
+                    <button class="button" type="submit">Save contact</button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </section>
+        </section>
+      </section>
+
+      <section id="outreach" class="view">
+        <section class="panel">
+          <h2>Outreach Account</h2>
+          <div id="outreachStatusBox" class="statusBox">
+            <strong>Checking Resend connection...</strong>
+            <span>Campaign sending stays locked until the app is live with unsubscribe and bounce tracking.</span>
+          </div>
+          <div class="metricGrid outreachMetrics">
+            <div class="metric">
+              <span>Eligible buyer emails</span>
+              <strong id="oEligible">-</strong>
+            </div>
+            <div class="metric">
+              <span>Countries ready</span>
+              <strong id="oCountries">-</strong>
+            </div>
+            <div class="metric">
+              <span>Misc excluded</span>
+              <strong id="oMisc">-</strong>
+            </div>
+            <div class="metric">
+              <span>Suppressed emails</span>
+              <strong id="oSuppressed">-</strong>
+            </div>
+          </div>
+          <p id="outreachSafetyNote" class="hint"></p>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="customerDialog">
+      <form method="dialog" id="customerForm" class="form dialogForm">
+        <h2>Add customer</h2>
+        <input name="company" placeholder="Company" required />
+        <input name="person" placeholder="Person" />
+        <input name="role" placeholder="Role" />
+        <div class="split">
+          <input name="country" placeholder="Country" />
+          <input name="city" placeholder="City" />
+        </div>
+        <div class="split">
+          <input name="mobile" placeholder="Mobile / WhatsApp" />
+          <input name="phone" placeholder="Phone / Office" />
+        </div>
+        <input name="email" placeholder="Email" />
+        <input name="website" placeholder="Website" />
+        <textarea name="notes" placeholder="Notes"></textarea>
+        <div class="dialogActions">
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button class="button" id="saveCustomerBtn" value="default">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="addDialog">
+      <div class="dialogForm">
+        <h2>Add to database</h2>
+        <div class="choiceGrid">
+          <button id="chooseCardBtn" class="choiceButton">
+            <strong>Card photo</strong>
+            <span>Use mobile camera or upload an image. OCR and AI cleanup will attach here next.</span>
+          </button>
+          <button id="chooseManualBtn" class="choiceButton">
+            <strong>Manual entry</strong>
+            <span>Add a clean contact by typing details yourself.</span>
+          </button>
+        </div>
+        <div class="dialogActions">
+          <button id="closeAddDialogBtn" class="button secondary">Cancel</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="cardDialog">
+      <form id="quickCardForm" class="form dialogForm">
+        <h2>Add card photo</h2>
+        <input id="quickCardFileInput" class="visuallyHidden" name="file" type="file" accept="image/*" capture="environment" />
+        <div class="photoActions">
+          <button class="button filePickButton" type="button" data-input="quickCardFileInput" data-mode="camera">Take photo</button>
+          <button class="button secondary filePickButton" type="button" data-input="quickCardFileInput" data-mode="library">Choose image</button>
+        </div>
+        <p id="quickCardFileName" class="hint selectedFile">No card photo selected.</p>
+        <div class="dialogActions">
+          <button class="button secondary" id="cancelCardBtn" type="button">Cancel</button>
+          <button class="button hidden" id="saveCardBtn" type="button">Read card</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="processingOverlay" class="processingOverlay hidden" aria-live="polite" aria-busy="true">
+      <div class="processingBox">
+        <strong id="processingTitle">Reading card</strong>
+        <span id="processingText">Please wait...</span>
+      </div>
+    </div>
+    <div id="toast"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
