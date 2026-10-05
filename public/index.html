@@ -341,6 +341,59 @@
           </div>
           <p id="outreachSafetyNote" class="hint"></p>
         </section>
+
+        <section class="panel outreachComposer">
+          <div class="panelHeader">
+            <div>
+              <h2>Country Campaign</h2>
+              <p class="hint inlineHint">Send one email every 5 minutes. Miscellaneous contacts stay excluded.</p>
+            </div>
+            <button id="draftOutreachBtn" class="button secondary" type="button">AI draft</button>
+          </div>
+          <form id="outreachForm" class="form">
+            <div class="split">
+              <label>
+                Country
+                <select id="outreachCountry" name="country" required>
+                  <option value="">Choose country</option>
+                </select>
+              </label>
+              <label>
+                Test email
+                <input id="outreachTestEmail" name="testEmail" placeholder="your email for test" type="email" />
+              </label>
+            </div>
+            <label>
+              CC copy to
+              <input id="outreachCc" name="cc" placeholder="optional cc email, comma separated" />
+            </label>
+            <label>
+              Subject
+              <input id="outreachSubject" name="subject" placeholder="Email subject" required />
+            </label>
+            <label>
+              Email body
+              <textarea id="outreachBody" name="body" rows="11" placeholder="Use {{person}}, {{company}}, {{country}}, {{unsubscribe_url}}" required></textarea>
+            </label>
+            <div class="outreachActions">
+              <button id="previewOutreachBtn" class="button secondary" type="button">Preview list</button>
+              <button id="sendTestOutreachBtn" class="button secondary" type="button">Send test email</button>
+              <button id="startOutreachBtn" class="button danger" type="button" disabled>Send to country</button>
+            </div>
+          </form>
+          <div id="outreachPreview" class="hint"></div>
+          <div class="tableWrap outreachPreviewTable hidden">
+            <table>
+              <thead><tr><th>Company</th><th>Person</th><th>Country</th><th>Email</th></tr></thead>
+              <tbody id="outreachPreviewRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Campaign Queue</h2>
+          <div id="outreachCampaigns" class="stack"></div>
+        </section>
       </section>
     </main>
 

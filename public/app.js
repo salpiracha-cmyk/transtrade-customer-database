@@ -5,7 +5,9 @@ const state = {
   sourceTypes: [],
   activeView: "dashboard",
   cardUploadBusy: false,
-  dashboardSearchCustomers: []
+  dashboardSearchCustomers: [],
+  outreachTestPassed: false,
+  outreachPreviewTotal: 0
 };
 
 const titles = {
@@ -62,6 +64,23 @@ document.getElementById("reloadResearchBtn").addEventListener("click", loadResea
 document.querySelectorAll(".filePickButton").forEach((button) => button.addEventListener("click", openPhotoPicker));
 document.getElementById("cardFileInput").addEventListener("change", handleCardFileSelected);
 document.getElementById("quickCardFileInput").addEventListener("change", handleCardFileSelected);
+document.getElementById("outreachCountry").addEventListener("change", () => {
+  state.outreachTestPassed = false;
+  updateOutreachSendButton();
+  previewOutreachList();
+});
+document.getElementById("outreachSubject").addEventListener("input", () => {
+  state.outreachTestPassed = false;
+  updateOutreachSendButton();
+});
+document.getElementById("outreachBody").addEventListener("input", () => {
+  state.outreachTestPassed = false;
+  updateOutreachSendButton();
+});
+document.getElementById("previewOutreachBtn").addEventListener("click", previewOutreachList);
+document.getElementById("sendTestOutreachBtn").addEventListener("click", sendOutreachTest);
+document.getElementById("startOutreachBtn").addEventListener("click", startOutreachCampaign);
+document.getElementById("draftOutreachBtn").addEventListener("click", draftOutreachEmail);
 
 await refresh();
 await loadAiStatus();
@@ -582,16 +601,167 @@ async function loadOutreachStatus() {
     document.getElementById("oMisc").textContent = status.totals.miscellaneousExcluded;
     document.getElementById("oSuppressed").textContent = status.totals.suppressedEmails;
     const connectedText = status.connected ? "Resend outreach account linked" : "Resend outreach account not linked";
-    const sendText = status.sendingEnabled ? "campaign sending enabled" : "campaign sending locked";
+    const sendText = status.sendingEnabled ? "campaign sending available" : "campaign sending locked";
     box.innerHTML = `
       <strong>${escapeHtml(connectedText)}</strong>
-      <span>${escapeHtml(status.sender)} · ${escapeHtml(status.domain)} · ${escapeHtml(sendText)}</span>
+      <span>${escapeHtml(status.sender)} · ${escapeHtml(status.domain)} · ${escapeHtml(sendText)} · 5 minute gap</span>
     `;
     document.getElementById("outreachSafetyNote").textContent =
-      "Only potential buyer records with email addresses are counted here. Miscellaneous contacts stay excluded. Live sending still needs unsubscribe pages and Resend bounce webhooks after deployment.";
+      "Only potential buyer records with email addresses are counted here. Miscellaneous contacts stay excluded. Every campaign sends one customer email every 5 minutes.";
+    const countrySelect = document.getElementById("outreachCountry");
+    const selected = countrySelect.value;
+    countrySelect.innerHTML = `<option value="">Choose country</option>` + status.countries.map((country) => `<option value="${escapeAttr(country)}">${escapeHtml(country)}</option>`).join("");
+    countrySelect.value = selected;
+    updateOutreachSendButton();
+    await loadOutreachCampaigns();
   } catch (error) {
     box.innerHTML = `<strong>Could not check outreach connection.</strong><span>${escapeHtml(error.message)}</span>`;
   }
+}
+
+async function previewOutreachList() {
+  const country = document.getElementById("outreachCountry").value;
+  const preview = document.getElementById("outreachPreview");
+  const wrap = document.querySelector(".outreachPreviewTable");
+  const rows = document.getElementById("outreachPreviewRows");
+  if (!country) {
+    preview.textContent = "Choose a country first.";
+    wrap.classList.add("hidden");
+    state.outreachPreviewTotal = 0;
+    updateOutreachSendButton();
+    return;
+  }
+  try {
+    const data = await api(`/api/outreach/preview?country=${encodeURIComponent(country)}`);
+    state.outreachPreviewTotal = data.total;
+    preview.innerHTML = `<strong>${data.total}</strong> eligible buyer email${data.total === 1 ? "" : "s"} for ${escapeHtml(country)}. Showing first ${data.recipients.length}.`;
+    rows.innerHTML = data.recipients.map((r) => `
+      <tr>
+        <td>${escapeHtml(r.company)}</td>
+        <td>${escapeHtml(r.person)}</td>
+        <td>${escapeHtml(r.country)}</td>
+        <td>${escapeHtml(r.email)}</td>
+      </tr>
+    `).join("");
+    wrap.classList.toggle("hidden", !data.recipients.length);
+    updateOutreachSendButton();
+  } catch (error) {
+    preview.textContent = error.message;
+    wrap.classList.add("hidden");
+  }
+}
+
+async function draftOutreachEmail() {
+  const country = document.getElementById("outreachCountry").value;
+  if (!country) {
+    toast("Choose country first");
+    return;
+  }
+  try {
+    showProcessing("Drafting email", "AI is preparing a short outreach email.");
+    const draft = await api("/api/outreach/draft", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ country })
+    });
+    document.getElementById("outreachSubject").value = draft.subject || "";
+    document.getElementById("outreachBody").value = draft.body || "";
+    state.outreachTestPassed = false;
+    updateOutreachSendButton();
+    toast(`Draft ready (${draft.provider})`);
+  } catch (error) {
+    toast(`Draft failed: ${error.message}`);
+  } finally {
+    hideProcessing();
+  }
+}
+
+async function sendOutreachTest() {
+  const payload = outreachPayload();
+  if (!payload.country || !payload.subject || !payload.body) {
+    toast("Country, subject, and body are required");
+    return;
+  }
+  if (!payload.testEmail) {
+    toast("Enter your test email first");
+    return;
+  }
+  try {
+    showProcessing("Sending test", "Sending a test email before the real campaign.");
+    const result = await api("/api/outreach/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    state.outreachTestPassed = true;
+    updateOutreachSendButton();
+    toast(`Test sent to ${result.to}`);
+  } catch (error) {
+    state.outreachTestPassed = false;
+    updateOutreachSendButton();
+    toast(`Test failed: ${error.message}`);
+  } finally {
+    hideProcessing();
+  }
+}
+
+async function startOutreachCampaign() {
+  const payload = outreachPayload();
+  if (!state.outreachTestPassed) {
+    toast("Send test email first");
+    return;
+  }
+  if (!state.outreachPreviewTotal) await previewOutreachList();
+  const total = state.outreachPreviewTotal;
+  if (!total) {
+    toast("No eligible emails for this country");
+    return;
+  }
+  const hours = Math.ceil((Math.max(total - 1, 0) * 5) / 60);
+  const ok = confirm(`Send ${total} emails to ${payload.country}? The app will send one email every 5 minutes. Approx time: ${hours || 1} hour(s).`);
+  if (!ok) return;
+  try {
+    const result = await api("/api/outreach/campaigns", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...payload, confirmed: true })
+    });
+    state.outreachTestPassed = false;
+    updateOutreachSendButton();
+    toast(`Campaign queued: ${result.campaign.total} emails`);
+    await loadOutreachCampaigns();
+  } catch (error) {
+    toast(`Campaign failed: ${error.message}`);
+  }
+}
+
+async function loadOutreachCampaigns() {
+  const el = document.getElementById("outreachCampaigns");
+  if (!el) return;
+  const data = await api("/api/outreach/campaigns");
+  el.innerHTML = data.campaigns.length ? data.campaigns.map((c) => `
+    <div class="campaignItem">
+      <strong>${escapeHtml(c.country)} · ${escapeHtml(c.status)}</strong>
+      <span>${c.sent}/${c.total} sent · ${c.failed} failed · ${c.skipped} skipped · ${c.queued} queued</span>
+      <span>${c.nextSendAt ? `Next: ${escapeHtml(new Date(c.nextSendAt).toLocaleString())}` : "No pending send"}</span>
+    </div>
+  `).join("") : `<span class="muted">No campaigns queued yet.</span>`;
+}
+
+function outreachPayload() {
+  return {
+    country: document.getElementById("outreachCountry").value,
+    testEmail: document.getElementById("outreachTestEmail").value,
+    cc: document.getElementById("outreachCc").value,
+    subject: document.getElementById("outreachSubject").value,
+    body: document.getElementById("outreachBody").value
+  };
+}
+
+function updateOutreachSendButton() {
+  const button = document.getElementById("startOutreachBtn");
+  if (!button) return;
+  button.disabled = !state.outreachTestPassed || !document.getElementById("outreachCountry").value;
 }
 
 function showOcrReview(result) {

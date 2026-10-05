@@ -30,9 +30,11 @@ const RESEND_FROM_NAME = process.env.RESEND_FROM_NAME || "Transtrade Internation
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "business@outreach.transtradeinternational.com";
 const RESEND_DOMAIN = process.env.RESEND_DOMAIN || "outreach.transtradeinternational.com";
 const OUTREACH_SEND_ENABLED = process.env.OUTREACH_SEND_ENABLED === "true";
+const OUTREACH_SEND_GAP_MS = Number(process.env.OUTREACH_SEND_GAP_MS || 300000);
 const APP_USER = process.env.APP_USER || "tti";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const execFileAsync = promisify(execFile);
+let outreachProcessing = false;
 
 const SOURCE_TRUST = {
   "clean_excel": 100,
@@ -88,6 +90,10 @@ async function startServer() {
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
+      if (isPublicUnsubscribeRoute(url)) {
+        await handlePublicUnsubscribe(req, res, url);
+        return;
+      }
       if (APP_PASSWORD && !isAuthorized(req)) {
         requestAuth(res);
         return;
@@ -106,6 +112,14 @@ async function startServer() {
   server.listen(PORT, HOST, () => {
     console.log(`Transtrade Customer Database running at http://${HOST}:${PORT}`);
   });
+  setInterval(() => {
+    processOutreachQueue().catch((error) => console.error("Outreach queue error", error));
+  }, 15000).unref();
+  processOutreachQueue().catch((error) => console.error("Outreach queue error", error));
+}
+
+function isPublicUnsubscribeRoute(url) {
+  return url.pathname === "/unsubscribe" || url.pathname === "/api/unsubscribe";
 }
 
 function isAuthorized(req) {
@@ -264,6 +278,113 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/outreach/status") {
     const db = await readDb();
     sendJson(res, 200, buildOutreachStatus(db));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/outreach/preview") {
+    const db = await readDb();
+    const country = url.searchParams.get("country") || "";
+    const recipients = getOutreachRecipients(db, { country });
+    sendJson(res, 200, {
+      country,
+      total: recipients.length,
+      recipients: recipients.slice(0, 50).map((item) => ({
+        customerId: item.customer.id,
+        company: item.customer.company || "",
+        person: item.customer.person || "",
+        country: item.customer.country || "",
+        email: item.email
+      }))
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/outreach/draft") {
+    const body = await readJson(req);
+    const country = normalizeCountryName(body.country || "");
+    const draft = await draftOutreachEmail({ country, purpose: body.purpose || "" });
+    sendJson(res, 200, draft);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/outreach/test") {
+    const body = await readJson(req);
+    const db = await readDb();
+    const country = normalizeCountryName(body.country || "");
+    const testEmail = normalizeEmail(body.testEmail || "");
+    if (!testEmail) return sendJson(res, 400, { error: "Test email is required" });
+    const recipients = getOutreachRecipients(db, { country });
+    if (!recipients.length) return sendJson(res, 400, { error: "No eligible buyer emails for this country" });
+    const sample = recipients[0];
+    const sent = await sendOutreachEmail({
+      to: testEmail,
+      cc: splitEmails(body.cc || ""),
+      subject: normalizeText(body.subject || ""),
+      body: normalizeMultilineText(body.body || ""),
+      customer: sample.customer,
+      campaignId: "test",
+      itemId: crypto.randomUUID(),
+      testMode: true
+    });
+    db.events.push(event("outreach_test_sent", testEmail, { country, subject: body.subject || "", providerId: sent.id || "" }));
+    await writeDb(db);
+    sendJson(res, 200, { sent: true, to: testEmail, providerId: sent.id || "" });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/outreach/campaigns") {
+    const body = await readJson(req);
+    const db = await readDb();
+    const country = normalizeCountryName(body.country || "");
+    const subject = normalizeText(body.subject || "");
+    const emailBody = normalizeMultilineText(body.body || "");
+    if (!country) return sendJson(res, 400, { error: "Country is required" });
+    if (!subject || !emailBody) return sendJson(res, 400, { error: "Subject and email body are required" });
+    if (body.confirmed !== true) return sendJson(res, 400, { error: "Confirm the campaign after sending a test email" });
+    if (!RESEND_API_KEY) return sendJson(res, 400, { error: "Resend API key is not configured" });
+    const recipients = getOutreachRecipients(db, { country });
+    if (!recipients.length) return sendJson(res, 400, { error: "No eligible buyer emails for this country" });
+    const campaignId = crypto.randomUUID();
+    const startAt = Date.now();
+    const cc = splitEmails(body.cc || "");
+    const items = recipients.map((recipient, index) => ({
+      id: crypto.randomUUID(),
+      customerId: recipient.customer.id,
+      to: recipient.email,
+      cc,
+      status: "queued",
+      scheduledAt: new Date(startAt + index * OUTREACH_SEND_GAP_MS).toISOString(),
+      attempts: 0
+    }));
+    const campaign = {
+      id: campaignId,
+      country,
+      subject,
+      body: emailBody,
+      cc,
+      status: "queued",
+      sendGapMinutes: OUTREACH_SEND_GAP_MS / 60000,
+      total: items.length,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      createdAt: now(),
+      updatedAt: now(),
+      items
+    };
+    db.campaigns ||= [];
+    db.campaigns.push(campaign);
+    db.events.push(event("outreach_campaign_created", campaignId, { country, total: items.length, gapMs: OUTREACH_SEND_GAP_MS }));
+    await writeDb(db);
+    processOutreachQueue().catch((error) => console.error("Outreach queue error", error));
+    sendJson(res, 201, { campaign: campaignSummary(campaign) });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/outreach/campaigns") {
+    const db = await readDb();
+    const campaigns = (db.campaigns || []).slice(-10).reverse().map(campaignSummary);
+    sendJson(res, 200, { campaigns });
     return;
   }
 
@@ -929,15 +1050,17 @@ function buildOutreachStatus(db) {
   const countries = [...new Set(eligible.map((c) => normalizeCountryName(c.country)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return {
     connected: Boolean(RESEND_API_KEY && RESEND_FROM_EMAIL && RESEND_DOMAIN),
-    sendingEnabled: OUTREACH_SEND_ENABLED,
+    sendingEnabled: Boolean(RESEND_API_KEY),
     sender: `${RESEND_FROM_NAME} <${RESEND_FROM_EMAIL}>`,
     domain: RESEND_DOMAIN,
     domainVerified: RESEND_DOMAIN === "outreach.transtradeinternational.com",
     safety: {
       miscellaneousExcluded: true,
       suppressionListReady: Array.isArray(db.suppressions),
-      unsubscribeRequiredBeforeLive: true,
-      resendWebhookRequiredBeforeLive: true
+      unsubscribeReady: true,
+      resendWebhookRecommended: true,
+      sendGapMinutes: OUTREACH_SEND_GAP_MS / 60000,
+      testRequiredByUi: true
     },
     totals: {
       active: active.length,
@@ -949,6 +1072,298 @@ function buildOutreachStatus(db) {
       eligibleCountries: countries.length
     },
     countries
+  };
+}
+
+function getOutreachRecipients(db, { country = "" } = {}) {
+  const selectedCountry = normalizeCountryName(country);
+  const suppressedEmails = new Set((db.suppressions || []).map((item) => normalizeEmail(item.email)).filter(Boolean));
+  const seen = new Set();
+  const recipients = [];
+  for (const customer of db.customers || []) {
+    if (customer.archivedAt || isMiscellaneousContact(customer)) continue;
+    if (selectedCountry && normalizeCountryName(customer.country) !== selectedCountry) continue;
+    for (const email of splitEmails(customer.email)) {
+      const normalized = normalizeEmail(email);
+      if (!normalized || suppressedEmails.has(normalized) || seen.has(normalized)) continue;
+      seen.add(normalized);
+      recipients.push({ customer, email: normalized });
+    }
+  }
+  return recipients.sort((a, b) => {
+    const companyDiff = String(a.customer.company || "").localeCompare(String(b.customer.company || ""));
+    if (companyDiff) return companyDiff;
+    return a.email.localeCompare(b.email);
+  });
+}
+
+async function draftOutreachEmail({ country, purpose }) {
+  const prompt = [
+    "Write a short B2B rice export revival email for Transtrade International.",
+    `Country: ${country || "selected country"}.`,
+    purpose ? `Extra context: ${purpose}.` : "",
+    "Use a respectful business tone. Keep the subject under 55 characters.",
+    "Do not invent prices, shipment details, certifications, or claims.",
+    "Return strict JSON with subject and body fields. Body may use {{person}}, {{company}}, {{country}}, and {{unsubscribe_url}} placeholders."
+  ].filter(Boolean).join("\n");
+
+  if (OPENAI_API_KEY) {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${OPENAI_API_KEY}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.4
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || "OpenAI draft failed");
+    const text = data.choices?.[0]?.message?.content || "";
+    return parseDraftJson(text, "openai");
+  }
+
+  if (GEMINI_API_KEY) {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4 }
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || "Gemini draft failed");
+    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("\n") || "";
+    return parseDraftJson(text, "gemini");
+  }
+
+  return {
+    provider: "template",
+    subject: `Rice business with Transtrade`,
+    body: [
+      "Dear {{person}},",
+      "",
+      "I hope you are well.",
+      "",
+      "We are reconnecting with rice buyers in {{country}} for upcoming business from Transtrade International. Please let us know if {{company}} is currently reviewing rice import requirements or supplier options.",
+      "",
+      "Regards,",
+      "Transtrade International",
+      "",
+      "Unsubscribe: {{unsubscribe_url}}"
+    ].join("\n")
+  };
+}
+
+function parseDraftJson(text, provider) {
+  const match = String(text || "").match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]);
+      return {
+        provider,
+        subject: normalizeText(parsed.subject || "Rice business with Transtrade"),
+        body: normalizeMultilineText(parsed.body || "")
+      };
+    } catch {}
+  }
+  return {
+    provider,
+    subject: "Rice business with Transtrade",
+    body: normalizeMultilineText(text || "")
+  };
+}
+
+async function processOutreachQueue() {
+  if (outreachProcessing || !RESEND_API_KEY) return;
+  outreachProcessing = true;
+  try {
+    const db = await readDb();
+    let changed = false;
+    const campaigns = db.campaigns || [];
+    const dueTime = Date.now();
+    for (const campaign of campaigns) {
+      if (campaign.status === "complete" || campaign.status === "paused") continue;
+      const dueItem = (campaign.items || []).find((item) => item.status === "queued" && Date.parse(item.scheduledAt) <= dueTime);
+      if (!dueItem) {
+        if ((campaign.items || []).some((item) => item.status === "queued")) campaign.status = "queued";
+        continue;
+      }
+      const customer = (db.customers || []).find((c) => c.id === dueItem.customerId);
+      if (!customer || isEmailSuppressed(db, dueItem.to)) {
+        dueItem.status = "skipped";
+        dueItem.skippedAt = now();
+        campaign.skipped = (campaign.skipped || 0) + 1;
+        campaign.updatedAt = now();
+        changed = true;
+        continue;
+      }
+      try {
+        campaign.status = "running";
+        dueItem.status = "sending";
+        dueItem.attempts = (dueItem.attempts || 0) + 1;
+        campaign.updatedAt = now();
+        await writeDb(db);
+        const result = await sendOutreachEmail({
+          to: dueItem.to,
+          cc: dueItem.cc || [],
+          subject: campaign.subject,
+          body: campaign.body,
+          customer,
+          campaignId: campaign.id,
+          itemId: dueItem.id,
+          testMode: false
+        });
+        dueItem.status = "sent";
+        dueItem.sentAt = now();
+        dueItem.providerId = result.id || "";
+        campaign.sent = (campaign.sent || 0) + 1;
+        campaign.updatedAt = now();
+        db.events.push(event("outreach_email_sent", dueItem.to, { campaignId: campaign.id, itemId: dueItem.id, providerId: dueItem.providerId }));
+      } catch (error) {
+        dueItem.status = "failed";
+        dueItem.failedAt = now();
+        dueItem.error = String(error.message || error);
+        campaign.failed = (campaign.failed || 0) + 1;
+        campaign.updatedAt = now();
+        db.events.push(event("outreach_email_failed", dueItem.to, { campaignId: campaign.id, itemId: dueItem.id, error: dueItem.error }));
+      }
+      if ((campaign.items || []).every((item) => item.status === "sent" || item.status === "failed" || item.status === "skipped")) {
+        campaign.status = "complete";
+        campaign.completedAt = now();
+      }
+      changed = true;
+      break;
+    }
+    if (changed) await writeDb(db);
+  } finally {
+    outreachProcessing = false;
+  }
+}
+
+async function sendOutreachEmail({ to, cc = [], subject, body, customer, campaignId, itemId, testMode }) {
+  if (!RESEND_API_KEY) throw new Error("Resend API key is not configured");
+  const unsubscribeUrl = buildUnsubscribeUrl(to);
+  const renderedSubject = renderTemplate(subject || "Rice business with Transtrade", customer, { unsubscribeUrl, testMode });
+  const renderedText = renderTemplate(body || "", customer, { unsubscribeUrl, testMode });
+  const html = textToHtml(renderedText, unsubscribeUrl);
+  const payload = {
+    from: `${RESEND_FROM_NAME} <${RESEND_FROM_EMAIL}>`,
+    to: [to],
+    subject: testMode ? `[TEST] ${renderedSubject}` : renderedSubject,
+    text: renderedText,
+    html,
+    headers: {
+      "List-Unsubscribe": `<${unsubscribeUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    }
+  };
+  const cleanCc = [...new Set((cc || []).map(normalizeEmail).filter((email) => email && email !== to))];
+  if (cleanCc.length) payload.cc = cleanCc;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "authorization": `Bearer ${RESEND_API_KEY}`,
+      "content-type": "application/json",
+      "idempotency-key": `tti-outreach-${campaignId}-${itemId}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || data.error || `Resend error ${response.status}`);
+  return data;
+}
+
+function renderTemplate(template, customer, { unsubscribeUrl, testMode = false }) {
+  const person = customer.person || "Sir/Madam";
+  return String(template || "")
+    .replaceAll("{{person}}", person)
+    .replaceAll("{{company}}", customer.company || "your company")
+    .replaceAll("{{country}}", customer.country || "your country")
+    .replaceAll("{{email}}", splitEmails(customer.email)[0] || "")
+    .replaceAll("{{unsubscribe_url}}", unsubscribeUrl)
+    .replaceAll("{{test_note}}", testMode ? "This is a test email." : "");
+}
+
+function textToHtml(text, unsubscribeUrl) {
+  const body = escapeHtml(String(text || "")).replace(/\n/g, "<br>");
+  const link = escapeHtml(unsubscribeUrl);
+  return `<!doctype html><html><body style="font-family:Arial,sans-serif;line-height:1.5;color:#1f2a22">${body}<hr><p style="font-size:12px;color:#667">Transtrade International<br><a href="${link}">Unsubscribe</a></p></body></html>`;
+}
+
+function buildUnsubscribeUrl(email) {
+  const safeEmail = normalizeEmail(email);
+  const token = crypto.createHmac("sha256", APP_PASSWORD || RESEND_API_KEY || "transtrade").update(safeEmail).digest("hex");
+  return `https://buyers.transtradeinternational.com/unsubscribe?email=${encodeURIComponent(safeEmail)}&token=${encodeURIComponent(token)}`;
+}
+
+function verifyUnsubscribeToken(email, token) {
+  const expected = crypto.createHmac("sha256", APP_PASSWORD || RESEND_API_KEY || "transtrade").update(normalizeEmail(email)).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(String(token || "").padEnd(expected.length, "0").slice(0, expected.length)));
+}
+
+async function handlePublicUnsubscribe(req, res, url) {
+  const email = normalizeEmail(url.searchParams.get("email") || "");
+  const token = url.searchParams.get("token") || "";
+  if (!email || !verifyUnsubscribeToken(email, token)) {
+    res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+    res.end("<h1>Invalid unsubscribe link</h1>");
+    return;
+  }
+  const db = await readDb();
+  suppressEmail(db, email, "unsubscribe", "unsubscribe_link");
+  await writeDb(db);
+  if (req.method === "POST") {
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    res.end("");
+    return;
+  }
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(`<!doctype html><html><body style="font-family:Arial,sans-serif"><h1>Unsubscribed</h1><p>${escapeHtml(email)} has been removed from Transtrade marketing outreach.</p></body></html>`);
+}
+
+function suppressEmail(db, email, reason, sourceId = "") {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return;
+  db.suppressions ||= [];
+  const existing = db.suppressions.find((item) => normalizeEmail(item.email) === normalized);
+  if (existing) {
+    existing.reason = existing.reason || reason;
+    existing.updatedAt = now();
+    return;
+  }
+  db.suppressions.push({ email: normalized, reason, sourceId, createdAt: now() });
+  db.events ||= [];
+  db.events.push(event("email_suppressed", normalized, { reason, sourceId }));
+}
+
+function isEmailSuppressed(db, email) {
+  const normalized = normalizeEmail(email);
+  return (db.suppressions || []).some((item) => normalizeEmail(item.email) === normalized);
+}
+
+function campaignSummary(campaign) {
+  const items = campaign.items || [];
+  const queued = items.filter((item) => item.status === "queued").length;
+  const next = items.filter((item) => item.status === "queued").sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))[0];
+  return {
+    id: campaign.id,
+    country: campaign.country,
+    subject: campaign.subject,
+    status: campaign.status,
+    total: campaign.total || items.length,
+    sent: campaign.sent || items.filter((item) => item.status === "sent").length,
+    failed: campaign.failed || items.filter((item) => item.status === "failed").length,
+    skipped: campaign.skipped || items.filter((item) => item.status === "skipped").length,
+    queued,
+    sendGapMinutes: campaign.sendGapMinutes || OUTREACH_SEND_GAP_MS / 60000,
+    nextSendAt: next?.scheduledAt || "",
+    createdAt: campaign.createdAt,
+    completedAt: campaign.completedAt || ""
   };
 }
 
@@ -1057,11 +1472,15 @@ function splitEmails(value) {
   return normalizeText(value)
     .split(/[;,|\s]+/)
     .map((email) => normalizeEmail(email))
-    .filter(Boolean);
+    .filter(isValidEmail);
 }
 
 function normalizeEmail(value) {
   return normalizeText(value).toLowerCase().replace(/^mailto:/, "").replace(/[<>()"'.,;]+$/g, "");
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(value || ""));
 }
 
 function categoryMatches(c, category) {
@@ -1225,6 +1644,17 @@ function normalizeText(value) {
   return String(value).replace(/\s+/g, " ").trim();
 }
 
+function normalizeMultilineText(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function event(type, targetId, detail) {
   return { id: crypto.randomUUID(), type, targetId, detail, createdAt: now() };
 }
@@ -1236,6 +1666,10 @@ function now() {
 function sendJson(res, status, payload) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[ch]));
 }
 
 async function readJson(req) {

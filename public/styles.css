@@ -205,6 +205,32 @@ p { margin: 0; }
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+.outreachComposer textarea {
+  min-height: 210px;
+}
+.outreachActions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 10px;
+}
+.button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.campaignItem {
+  border: 1px solid var(--line);
+  background: var(--cream);
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+}
+.campaignItem span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.outreachPreviewTable {
+  margin-top: 12px;
+}
 .exportCard {
   display: grid;
   gap: 6px;
