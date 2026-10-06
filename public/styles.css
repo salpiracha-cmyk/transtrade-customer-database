@@ -67,7 +67,10 @@ nav { display: grid; gap: 6px; }
 }
 .nav.active, .nav:hover { background: rgba(244,240,220,.16); color: white; }
 
-.app { min-width: 0; }
+.app {
+  min-width: 0;
+  overflow-x: hidden;
+}
 .topbar {
   height: 82px;
   display: flex;
@@ -270,12 +273,28 @@ textarea { min-height: 86px; resize: vertical; }
 .tableWrap {
   background: var(--cream);
   border: 1px solid var(--line);
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable both-edges;
+}
+.tableWrap::-webkit-scrollbar,
+nav::-webkit-scrollbar {
+  height: 12px;
+}
+.tableWrap::-webkit-scrollbar-thumb,
+nav::-webkit-scrollbar-thumb {
+  background: #8bae6f;
+}
+.tableWrap::-webkit-scrollbar-track,
+nav::-webkit-scrollbar-track {
+  background: #e7f1df;
 }
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 1180px;
 }
 th {
   background: #1f6f4a;
@@ -494,7 +513,8 @@ td {
 .rowActions {
   display: flex;
   gap: 8px;
-  min-width: 150px;
+  min-width: 280px;
+  white-space: nowrap;
 }
 .muted { color: var(--muted); font-size: 12px; }
 
@@ -552,11 +572,17 @@ dialog {
   line-height: 1.4;
 }
 
-@media (max-width: 820px) {
+@media (max-width: 1100px) {
   body { display: block; }
   .sidebar { position: sticky; top: 0; z-index: 3; padding: 12px; }
   .brand { margin-bottom: 10px; padding-bottom: 10px; }
-  nav { display: flex; overflow-x: auto; }
+  nav {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
   .nav { white-space: nowrap; }
   .topbar { height: auto; padding: 14px; gap: 12px; align-items: flex-start; }
   .actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -577,6 +603,9 @@ dialog {
   #searchInput { min-width: 100%; }
   .toolbar { align-items: stretch; }
   .toolbar > * { flex: 1 1 100%; }
+  table {
+    min-width: 1120px;
+  }
 }
 
 @media (max-width: 560px) {
@@ -671,8 +700,19 @@ dialog {
     max-height: 300px;
   }
   .tableWrap {
-    max-width: 100%;
-    overflow-x: auto;
+    margin-left: -12px;
+    margin-right: -12px;
+    border-left: 0;
+    border-right: 0;
+  }
+  table {
+    min-width: 1040px;
+  }
+  th, td {
+    padding: 10px 9px;
+  }
+  .rowActions {
+    min-width: 260px;
   }
   #toast {
     left: 12px;
