@@ -1431,6 +1431,7 @@ function customerCategoryRank(customer) {
 }
 
 function isMiscellaneousContact(customer) {
+  if (String(customer.manualCategory || "").toLowerCase() === "miscellaneous") return true;
   const text = [customer.company, customer.person, customer.role, customer.notes, customer.email, customer.website]
     .filter(Boolean)
     .join(" ")
@@ -1539,7 +1540,7 @@ function exportLabel(url) {
 
 function normalizeCustomer(record) {
   const customer = {};
-  for (const key of ["company", "person", "role", "country", "city", "phone", "mobile", "email", "website", "address", "notes", "priority", "sourceType", "sourceId", "sourcePhoto", "sourceFile", "sourceSheet"]) {
+  for (const key of ["company", "person", "role", "country", "city", "phone", "mobile", "email", "website", "address", "notes", "priority", "manualCategory", "sourceType", "sourceId", "sourcePhoto", "sourceFile", "sourceSheet"]) {
     customer[key] = normalizeText(record[key]);
   }
   customer.country = normalizeCountryName(customer.country);

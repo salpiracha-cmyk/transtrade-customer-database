@@ -6,6 +6,7 @@ const state = {
   activeView: "dashboard",
   cardUploadBusy: false,
   dashboardSearchCustomers: [],
+  editingCustomerId: null,
   outreachTestPassed: false,
   outreachPreviewTotal: 0
 };
@@ -109,8 +110,19 @@ function openAddDialog() {
   document.getElementById("addDialog").showModal();
 }
 
-function openCustomerDialog() {
-  document.getElementById("customerDialog").showModal();
+function openCustomerDialog(customer = null) {
+  const dialog = document.getElementById("customerDialog");
+  const form = document.getElementById("customerForm");
+  form.reset();
+  state.editingCustomerId = customer?.id || null;
+  form.querySelector("h2").textContent = customer ? "Edit customer" : "Add customer";
+  document.getElementById("saveCustomerBtn").textContent = customer ? "Save changes" : "Save";
+  if (customer) {
+    for (const field of ["company", "person", "role", "country", "city", "mobile", "phone", "email", "website", "notes"]) {
+      if (form.elements[field]) form.elements[field].value = customer[field] || "";
+    }
+  }
+  dialog.showModal();
 }
 
 function openCardDialog() {
@@ -257,18 +269,31 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
       <td class="${escapeHtml(qualityFor(c))}">${labelQuality(qualityFor(c))}</td>
       <td class="rowActions">
         <a class="button secondary" href="/api/export.vcf?id=${encodeURIComponent(c.id)}">VCF</a>
-        <button class="button secondary" data-archive="${c.id}">Archive</button>
+        <button class="button secondary" data-edit-customer="${escapeHtml(c.id)}">Edit</button>
+        <button class="button secondary" data-move-misc="${escapeHtml(c.id)}">Move to misc</button>
       </td>
     </tr>
   `);
   }
   body.innerHTML = customers.length ? rows.join("") : `<tr><td colspan="8" class="muted">${escapeHtml(emptyMessage)}</td></tr>`;
 
-  body.querySelectorAll("[data-archive]").forEach((button) => {
+  body.querySelectorAll("[data-edit-customer]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await fetch(`/api/customers/${button.dataset.archive}`, { method: "DELETE" });
-      toast("Archived");
+      const customer = [...state.customers, ...state.dashboardSearchCustomers].find((c) => c.id === button.dataset.editCustomer);
+      if (customer) openCustomerDialog(customer);
+    });
+  });
+
+  body.querySelectorAll("[data-move-misc]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/customers/${button.dataset.moveMisc}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manualCategory: "miscellaneous" })
+      });
+      toast("Moved to misc");
       await refresh();
+      if (state.activeView === "companyContacts") await loadCompanyContacts();
     });
   });
 }
@@ -471,15 +496,18 @@ async function saveManualCustomer(event) {
   const form = document.getElementById("customerForm");
   const values = Object.fromEntries(new FormData(form).entries());
   if (!values.company) return;
-  await api("/api/customers", {
-    method: "POST",
+  const isEdit = Boolean(state.editingCustomerId);
+  await api(isEdit ? `/api/customers/${state.editingCustomerId}` : "/api/customers", {
+    method: isEdit ? "PATCH" : "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...values, sourceType: "manual" })
+    body: JSON.stringify(isEdit ? values : { ...values, sourceType: "manual" })
   });
   form.reset();
+  state.editingCustomerId = null;
   document.getElementById("customerDialog").close();
-  toast("Customer saved");
+  toast(isEdit ? "Customer updated" : "Customer saved");
   await refresh();
+  if (state.activeView === "companyContacts") await loadCompanyContacts();
 }
 
 async function importFile(event) {
