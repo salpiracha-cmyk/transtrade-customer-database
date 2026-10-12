@@ -20,6 +20,7 @@
       <nav>
         <button class="nav active" data-view="dashboard">Dashboard</button>
         <button class="nav" data-view="customers">Customers</button>
+        <button class="nav" data-view="traders">Traders</button>
         <button class="nav" data-view="companyContacts">Miscellaneous</button>
         <button class="nav" data-view="research">Research Needed</button>
         <button class="nav" data-view="exports">Clean Exports</button>
@@ -168,6 +169,25 @@
             </div>
           </section>
         </div>
+      </section>
+
+      <section id="traders" class="view">
+        <section class="panel">
+          <div class="panelHeader">
+            <div>
+              <h2>Traders</h2>
+              <p class="hint inlineHint">International trading houses and trader portfolio contacts. These remain trade contacts and can be filtered by country.</p>
+            </div>
+            <div class="toolbar compact">
+              <input id="traderSearch" placeholder="Search traders" />
+              <select id="traderCountryFilter"><option value="">All countries</option></select>
+              <a class="button secondary" href="/api/export.xlsx?category=trader">Export</a>
+              <button id="reloadTradersBtn" class="button secondary">Reload</button>
+            </div>
+          </div>
+          <div id="tradersSummary" class="statusBox"></div>
+          <div id="traderGroups" class="stack"></div>
+        </section>
       </section>
 
       <section id="companyContacts" class="view">

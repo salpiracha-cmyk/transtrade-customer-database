@@ -15,6 +15,7 @@ const state = {
 const titles = {
   dashboard: ["Dashboard", "Local-first customer database foundation"],
   customers: ["Customers", "Search, edit, archive, and export buyer records"],
+  traders: ["Traders", "Trading houses and trader portfolio contacts by country"],
   companyContacts: ["Miscellaneous", "Non-buyer contacts excluded from outreach exports"],
   research: ["Research Needed", "Fix incomplete buyer records before outreach"],
   exports: ["Clean Exports", "Download clean outreach lists and cleanup workbooks"],
@@ -62,6 +63,9 @@ document.getElementById("duplicateTypeFilter").addEventListener("change", loadDu
 document.getElementById("reloadDuplicatesBtn").addEventListener("click", loadDuplicates);
 document.getElementById("companyContactSearch").addEventListener("input", debounce(loadCompanyContacts, 250));
 document.getElementById("reloadCompanyContactsBtn").addEventListener("click", loadCompanyContacts);
+document.getElementById("traderSearch").addEventListener("input", debounce(loadTraders, 250));
+document.getElementById("traderCountryFilter").addEventListener("change", loadTraders);
+document.getElementById("reloadTradersBtn").addEventListener("click", loadTraders);
 document.getElementById("researchSearch").addEventListener("input", debounce(loadResearch, 250));
 document.getElementById("researchSourceFilter").addEventListener("change", loadResearch);
 document.getElementById("reloadResearchBtn").addEventListener("click", loadResearch);
@@ -104,6 +108,7 @@ function switchView(view) {
   document.getElementById("viewTitle").textContent = titles[view][0];
   document.getElementById("viewSubtitle").textContent = titles[view][1];
   if (view === "duplicates") loadDuplicates();
+  if (view === "traders") loadTraders();
   if (view === "companyContacts") loadCompanyContacts();
   if (view === "research") loadResearch();
   if (view === "cards") loadAiStatus();
@@ -209,6 +214,10 @@ async function loadSummary() {
   const selectedResearchSource = researchSourceFilter.value;
   researchSourceFilter.innerHTML = `<option value="">All sources</option>` + state.sourceTypes.map((s) => `<option value="${escapeHtml(s)}">${labelSource(s)}</option>`).join("");
   researchSourceFilter.value = selectedResearchSource;
+  const traderCountryFilter = document.getElementById("traderCountryFilter");
+  const selectedTraderCountry = traderCountryFilter.value;
+  traderCountryFilter.innerHTML = `<option value="">All countries</option>` + summary.countries.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  traderCountryFilter.value = selectedTraderCountry;
   const countryOptions = document.getElementById("countryOptions");
   if (countryOptions) countryOptions.innerHTML = summary.countries.map((c) => `<option value="${escapeAttr(c)}"></option>`).join("");
 }
@@ -274,7 +283,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
   for (const c of customers) {
     const category = c.listCategory || "Potential Buyer";
     if (category !== lastCategory) {
-      rows.push(`<tr class="listSectionRow"><td colspan="8">${escapeHtml(category === "Miscellaneous" ? "Miscellaneous" : "Potential Buyers")}</td></tr>`);
+      rows.push(`<tr class="listSectionRow"><td colspan="8">${escapeHtml(category === "Miscellaneous" ? "Miscellaneous" : category === "Traders" ? "Traders" : "Potential Buyers")}</td></tr>`);
       lastCategory = category;
     }
     rows.push(`
@@ -290,6 +299,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
         <a class="button secondary" href="/api/export.vcf?id=${encodeURIComponent(c.id)}">VCF</a>
         <button class="button secondary" data-edit-customer="${escapeHtml(c.id)}">Edit</button>
         <button class="button secondary" data-move-country="${escapeHtml(c.id)}">Move country</button>
+        <button class="button secondary" data-move-trader="${escapeHtml(c.id)}">Move to traders</button>
         <button class="button secondary" data-move-misc="${escapeHtml(c.id)}">Move to misc</button>
       </td>
     </tr>
@@ -314,6 +324,19 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
       toast("Moved to misc");
       await refresh();
       if (state.activeView === "companyContacts") await loadCompanyContacts();
+    });
+  });
+
+  body.querySelectorAll("[data-move-trader]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/customers/${button.dataset.moveTrader}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manualCategory: "trader" })
+      });
+      toast("Moved to traders");
+      await refresh();
+      if (state.activeView === "traders") await loadTraders();
     });
   });
 
@@ -442,6 +465,64 @@ async function loadCompanyContacts() {
   });
 }
 
+async function loadTraders() {
+  const q = document.getElementById("traderSearch").value;
+  const country = document.getElementById("traderCountryFilter").value;
+  const params = new URLSearchParams({ category: "trader" });
+  if (q) params.set("q", q);
+  if (country) params.set("country", country);
+  const data = await api(`/api/customers?${params}`);
+  document.getElementById("tradersSummary").innerHTML = data.total
+    ? `<strong>${data.total}</strong> trader contacts loaded${country ? ` for ${escapeHtml(country)}` : ""}.`
+    : `No trader contacts match this filter.`;
+  const el = document.getElementById("traderGroups");
+  el.innerHTML = data.customers.length ? `
+    <div class="contactGrid">
+      ${data.customers.map((c) => `
+        <div class="contactCard">
+          <strong>${escapeHtml(c.company || "(No company)")}</strong>
+          <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
+          <span>${escapeHtml(c.person || "(No person)")}</span>
+          <span>${escapeHtml(c.role || "")}</span>
+          <span>${renderInlineContactList(c.mobile || c.phone || "No phone")}</span>
+          <span>${renderInlineContactList(c.email || "No email")}</span>
+          <em>${escapeHtml(labelSource(c.sourceType || ""))} · ${escapeHtml(labelQuality(c.dataQuality || qualityFor(c)))}</em>
+          <button class="button secondary" data-trader-edit="${escapeHtml(c.id)}">Edit</button>
+          <button class="button secondary" data-trader-country="${escapeHtml(c.id)}">Move country</button>
+          <button class="button secondary" data-trader-buyer="${escapeHtml(c.id)}">Move to buyers</button>
+        </div>
+      `).join("")}
+    </div>
+  ` : `<span class="muted">No trader contacts to show.</span>`;
+
+  el.querySelectorAll("[data-trader-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const customer = data.customers.find((c) => c.id === button.dataset.traderEdit);
+      if (customer) openCustomerDialog(customer);
+    });
+  });
+
+  el.querySelectorAll("[data-trader-country]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const customer = data.customers.find((c) => c.id === button.dataset.traderCountry);
+      openCountryMoveDialog(customer);
+    });
+  });
+
+  el.querySelectorAll("[data-trader-buyer]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/customers/${button.dataset.traderBuyer}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manualCategory: "" })
+      });
+      toast("Moved to buyers");
+      await refresh();
+      await loadTraders();
+    });
+  });
+}
+
 async function loadResearch() {
   const q = document.getElementById("researchSearch").value;
   const sourceType = document.getElementById("researchSourceFilter").value;
@@ -538,6 +619,7 @@ async function saveManualCustomer(event) {
   document.getElementById("customerDialog").close();
   toast(isEdit ? "Customer updated" : "Customer saved");
   await refresh();
+  if (state.activeView === "traders") await loadTraders();
   if (state.activeView === "companyContacts") await loadCompanyContacts();
 }
 
@@ -557,6 +639,7 @@ async function saveCountryMove(event) {
   toast("Country moved");
   await refresh();
   if (state.activeView === "research") await loadResearch();
+  if (state.activeView === "traders") await loadTraders();
   if (state.activeView === "companyContacts") await loadCompanyContacts();
 }
 

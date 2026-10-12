@@ -1039,6 +1039,7 @@ function buildSummary(db) {
   const research = active.filter((c) => getDataQuality(c) === "research_needed");
   const emailReady = active.filter((c) => contactMatches(c, "email"));
   const phoneReady = active.filter((c) => contactMatches(c, "any_phone"));
+  const traders = active.filter((c) => isTraderContact(c));
   return {
     totals: {
       active: active.length,
@@ -1050,7 +1051,8 @@ function buildSummary(db) {
       clean: ready.length,
       researchNeeded: research.length,
       emailReady: emailReady.length,
-      phoneReady: phoneReady.length
+      phoneReady: phoneReady.length,
+      traders: traders.length
     },
     countries,
     sourceTypes,
@@ -1407,10 +1409,12 @@ function getDataQuality(c) {
 }
 
 function withCustomerCategory(customer) {
+  const miscellaneous = isMiscellaneousContact(customer);
+  const trader = !miscellaneous && isTraderContact(customer);
   return {
     ...customer,
     country: normalizeCountryName(customer.country),
-    listCategory: isMiscellaneousContact(customer) ? "Miscellaneous" : "Potential Buyer"
+    listCategory: miscellaneous ? "Miscellaneous" : trader ? "Traders" : "Potential Buyer"
   };
 }
 
@@ -1427,10 +1431,13 @@ function sortCustomerList(customers) {
 }
 
 function customerCategoryRank(customer) {
-  return isMiscellaneousContact(customer) ? 1 : 0;
+  if (isMiscellaneousContact(customer)) return 2;
+  if (isTraderContact(customer)) return 1;
+  return 0;
 }
 
 function isMiscellaneousContact(customer) {
+  if (String(customer.manualCategory || "").toLowerCase() === "trader") return false;
   if (String(customer.manualCategory || "").toLowerCase() === "miscellaneous") return true;
   const text = [customer.company, customer.person, customer.role, customer.notes, customer.email, customer.website]
     .filter(Boolean)
@@ -1480,6 +1487,41 @@ function isMiscellaneousContact(customer) {
   return nonTradePatterns.some((pattern) => pattern.test(text));
 }
 
+function isTraderContact(customer) {
+  if (String(customer.manualCategory || "").toLowerCase() === "trader") return true;
+  if (String(customer.manualCategory || "").toLowerCase() === "miscellaneous") return false;
+  const company = normalizeText(customer.company).toLowerCase();
+  if (!company || isMiscellaneousContact(customer)) return false;
+  const traderPatterns = [
+    /\bolam\b/,
+    /\bmoi international\b/,
+    /\bmewah\b/,
+    /\bmehwa\b/,
+    /\blouis dreyfus\b/,
+    /\bdreyfus\b/,
+    /\bld commodities\b/,
+    /\bldc[-\s]?geneva\b/,
+    /\bldc\b/,
+    /\beast[ -]?bourne\b/,
+    /\bglobal transit\b/,
+    /\betg\b/,
+    /\bexport trading group\b/,
+    /\bexport trading commodities\b/,
+    /\bexport trading co\.?\s*ltd\b/,
+    /\bietc\b/,
+    /\bcargill\b/,
+    /\badm\b/,
+    /\bbunge\b/,
+    /\bcofco\b/,
+    /\bphoenix commodities\b/,
+    /\bameropa\b/,
+    /\bagrocorp\b/,
+    /\bwilmar\b/,
+    /\bgoldcrest commodities\b/
+  ];
+  return traderPatterns.some((pattern) => pattern.test(company));
+}
+
 function contactMatches(c, contact) {
   if (contact === "email") return Boolean(c.email);
   if (contact === "mobile") return Boolean(c.mobile);
@@ -1506,6 +1548,7 @@ function isValidEmail(value) {
 
 function categoryMatches(c, category) {
   if (category === "buyer") return !isMiscellaneousContact(c);
+  if (category === "trader" || category === "traders") return !isMiscellaneousContact(c) && isTraderContact(c);
   if (category === "misc" || category === "miscellaneous") return isMiscellaneousContact(c);
   return true;
 }
@@ -2103,12 +2146,16 @@ function csvRows(text) {
 async function buildXlsx(customers, title) {
   const headers = ["List Section", "Company", "Person", "Role", "Country", "City", "Phone", "Mobile", "Email", "Website", "Address", "Priority", "Status", "Data Quality", "Source Type", "Source ID", "Source Photo", "Notes"];
   const sorted = sortCustomerList(customers);
-  const buyers = sorted.filter((c) => !isMiscellaneousContact(c));
+  const buyers = sorted.filter((c) => !isMiscellaneousContact(c) && !isTraderContact(c));
+  const traders = sorted.filter((c) => !isMiscellaneousContact(c) && isTraderContact(c));
   const miscellaneous = sorted.filter((c) => isMiscellaneousContact(c));
   const rows = [
     headers,
     ["Potential Buyers"],
     ...buyers.map(exportCustomerRow),
+    [],
+    ["Traders"],
+    ...traders.map(exportCustomerRow),
     [],
     ["Miscellaneous"],
     ...miscellaneous.map(exportCustomerRow)
@@ -2125,7 +2172,7 @@ async function buildXlsx(customers, title) {
 
 function exportCustomerRow(c) {
   return [
-    c.listCategory || (isMiscellaneousContact(c) ? "Miscellaneous" : "Potential Buyer"),
+    c.listCategory || (isMiscellaneousContact(c) ? "Miscellaneous" : isTraderContact(c) ? "Traders" : "Potential Buyer"),
     c.company,
     c.person,
     c.role,
