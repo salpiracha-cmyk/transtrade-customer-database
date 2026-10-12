@@ -26,7 +26,7 @@ body {
   grid-template-columns: 260px 1fr;
   height: 100vh;
   height: 100dvh;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .sidebar {
@@ -289,8 +289,8 @@ textarea { min-height: 86px; resize: vertical; }
   background: var(--cream);
   border: 1px solid var(--line);
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
+  max-height: calc(100dvh - 190px);
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable both-edges;
 }
@@ -317,6 +317,9 @@ th {
   text-align: left;
   font-size: 12px;
   padding: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 td {
   border-top: 1px solid var(--line);
@@ -346,6 +349,15 @@ td {
   flex-wrap: wrap;
   gap: 5px;
   min-width: 180px;
+}
+.contactChipBlock {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 7px;
+}
+.contactChipBlock strong {
+  color: var(--muted);
+  font-size: 11px;
 }
 .contactChips span {
   display: inline-flex;
@@ -450,9 +462,10 @@ td {
   font-style: normal;
   overflow-wrap: anywhere;
 }
-.contactArchiveBtn {
-  align-self: end;
-  justify-self: start;
+.contactActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 6px;
 }
 .researchGrid {
@@ -640,6 +653,9 @@ dialog {
   body {
     display: flex;
     flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
   }
   .sidebar {
     flex: 0 0 auto;
@@ -653,6 +669,7 @@ dialog {
   .app {
     flex: 1 1 auto;
     height: auto;
+    overflow: visible;
   }
   .brand { margin-bottom: 10px; padding-bottom: 10px; }
   nav {
@@ -682,6 +699,9 @@ dialog {
   #searchInput { min-width: 100%; }
   .toolbar { align-items: stretch; }
   .toolbar > * { flex: 1 1 100%; }
+  .tableWrap {
+    max-height: calc(100dvh - 240px);
+  }
   table {
     min-width: 1120px;
   }
@@ -787,6 +807,7 @@ dialog {
     margin-right: -12px;
     border-left: 0;
     border-right: 0;
+    max-height: calc(100dvh - 220px);
   }
   table {
     min-width: 1040px;

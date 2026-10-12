@@ -86,6 +86,8 @@ function sortCustomerList(customers) {
 }
 
 function isMiscellaneousContact(customer) {
+  if (String(customer.manualCategory || "").toLowerCase() === "trader") return false;
+  if (String(customer.manualCategory || "").toLowerCase() === "miscellaneous") return true;
   const text = [customer.company, customer.person, customer.role, customer.notes, customer.email, customer.website]
     .filter(Boolean)
     .join(" ")

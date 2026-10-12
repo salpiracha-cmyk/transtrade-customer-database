@@ -291,7 +291,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
       <td><strong>${escapeHtml(c.company)}</strong><div class="muted">${escapeHtml(c.city || "")}</div></td>
       <td>${escapeHtml(c.country)}</td>
       <td>${escapeHtml(c.person)}<div class="muted">${escapeHtml(c.role || "")}</div></td>
-      <td>${renderContactChips(c.mobile || c.phone || "")}</td>
+      <td>${renderLabeledContactChips("Mobile", c.mobile || "")}${renderLabeledContactChips("Phone", c.phone || "")}</td>
       <td>${renderContactChips(c.email || "")}</td>
       <td><span class="badge">${escapeHtml(labelSource(c.sourceType || ""))}</span></td>
       <td class="${escapeHtml(qualityFor(c))}">${labelQuality(qualityFor(c))}</td>
@@ -446,14 +446,47 @@ async function loadCompanyContacts() {
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
           <span>${escapeHtml(c.person || "(No person)")}</span>
           <span>${escapeHtml(c.role || "")}</span>
-        <span>${renderInlineContactList(c.mobile || c.phone || "No phone")}</span>
-        <span>${renderInlineContactList(c.email || "No email")}</span>
+          <span><strong>Mobile:</strong> ${renderInlineContactList(c.mobile || "No mobile")}</span>
+          <span><strong>Phone:</strong> ${renderInlineContactList(c.phone || "No phone")}</span>
+          <span><strong>Email:</strong> ${renderInlineContactList(c.email || "No email")}</span>
           <em>${escapeHtml(labelSource(c.sourceType || ""))} · ${escapeHtml(labelQuality(c.dataQuality || qualityFor(c)))}</em>
-          <button class="button secondary contactArchiveBtn" data-contact-archive="${escapeHtml(c.id)}">Archive contact</button>
+          <div class="contactActions">
+            <button class="button secondary" data-contact-edit="${escapeHtml(c.id)}">Edit</button>
+            <button class="button secondary" data-contact-country="${escapeHtml(c.id)}">Move country</button>
+            <button class="button secondary" data-contact-buyer="${escapeHtml(c.id)}">Move to buyers</button>
+            <button class="button danger" data-contact-archive="${escapeHtml(c.id)}">Archive</button>
+          </div>
         </div>
       `).join("")}
     </div>
   ` : `<span class="muted">No miscellaneous contacts to show.</span>`;
+
+  el.querySelectorAll("[data-contact-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const customer = data.customers.find((c) => c.id === button.dataset.contactEdit);
+      if (customer) openCustomerDialog(customer);
+    });
+  });
+
+  el.querySelectorAll("[data-contact-country]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const customer = data.customers.find((c) => c.id === button.dataset.contactCountry);
+      openCountryMoveDialog(customer);
+    });
+  });
+
+  el.querySelectorAll("[data-contact-buyer]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/customers/${button.dataset.contactBuyer}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manualCategory: "" })
+      });
+      toast("Moved to buyers");
+      await refresh();
+      await loadCompanyContacts();
+    });
+  });
 
   el.querySelectorAll("[data-contact-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -484,8 +517,9 @@ async function loadTraders() {
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
           <span>${escapeHtml(c.person || "(No person)")}</span>
           <span>${escapeHtml(c.role || "")}</span>
-          <span>${renderInlineContactList(c.mobile || c.phone || "No phone")}</span>
-          <span>${renderInlineContactList(c.email || "No email")}</span>
+          <span><strong>Mobile:</strong> ${renderInlineContactList(c.mobile || "No mobile")}</span>
+          <span><strong>Phone:</strong> ${renderInlineContactList(c.phone || "No phone")}</span>
+          <span><strong>Email:</strong> ${renderInlineContactList(c.email || "No email")}</span>
           <em>${escapeHtml(labelSource(c.sourceType || ""))} · ${escapeHtml(labelQuality(c.dataQuality || qualityFor(c)))}</em>
           <button class="button secondary" data-trader-edit="${escapeHtml(c.id)}">Edit</button>
           <button class="button secondary" data-trader-country="${escapeHtml(c.id)}">Move country</button>
@@ -719,6 +753,12 @@ function syncMultiContactGroup(group) {
 function renderContactChips(value) {
   const items = splitContactValues(value);
   return items.length ? `<div class="contactChips">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : "";
+}
+
+function renderLabeledContactChips(label, value) {
+  const items = splitContactValues(value);
+  if (!items.length) return "";
+  return `<div class="contactChipBlock"><strong>${escapeHtml(label)}</strong>${renderContactChips(value)}</div>`;
 }
 
 function renderInlineContactList(value) {
