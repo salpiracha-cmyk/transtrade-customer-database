@@ -14,6 +14,9 @@
 }
 
 * { box-sizing: border-box; }
+html {
+  height: 100%;
+}
 body {
   margin: 0;
   font-family: Arial, Helvetica, sans-serif;
@@ -21,13 +24,17 @@ body {
   background: var(--bg);
   display: grid;
   grid-template-columns: 260px 1fr;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .sidebar {
   background: var(--nav);
   color: white;
   padding: 18px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .brand {
@@ -69,7 +76,12 @@ nav { display: grid; gap: 6px; }
 
 .app {
   min-width: 0;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
   overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .topbar {
   height: 82px;
@@ -79,6 +91,9 @@ nav { display: grid; gap: 6px; }
   padding: 0 24px;
   border-bottom: 1px solid var(--line);
   background: var(--cream);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 h1 { font-size: 22px; margin: 0 0 4px; }
@@ -326,6 +341,22 @@ td {
   background: var(--soft-green);
   color: var(--ink);
 }
+.contactChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 180px;
+}
+.contactChips span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  background: #e7f1df;
+  color: #143d2c;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .ready { color: var(--green); }
 .incomplete, .missing_email, .missing_mobile { color: var(--red); }
 .needs_review { color: var(--amber); }
@@ -453,6 +484,10 @@ td {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+.researchContactFields {
+  display: grid;
+  gap: 10px;
+}
 .researchActions {
   display: flex;
   gap: 8px;
@@ -513,15 +548,44 @@ td {
 .rowActions {
   display: flex;
   gap: 8px;
-  min-width: 280px;
+  min-width: 420px;
   white-space: nowrap;
 }
 .muted { color: var(--muted); font-size: 12px; }
+
+.multiContactGroup {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #fffef8;
+  padding: 10px;
+}
+.multiContactHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.multiContactInputs {
+  display: grid;
+  gap: 7px;
+}
+.multiContactRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
 
 dialog {
   border: 1px solid var(--line);
   padding: 0;
   width: min(620px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
 }
 .dialogForm { padding: 18px; }
 .dialogActions { display: flex; justify-content: flex-end; gap: 10px; }
@@ -573,8 +637,23 @@ dialog {
 }
 
 @media (max-width: 1100px) {
-  body { display: block; }
-  .sidebar { position: sticky; top: 0; z-index: 3; padding: 12px; }
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar {
+    flex: 0 0 auto;
+    min-height: 0;
+    max-height: 122px;
+    overflow-y: hidden;
+    position: relative;
+    z-index: 3;
+    padding: 12px;
+  }
+  .app {
+    flex: 1 1 auto;
+    height: auto;
+  }
   .brand { margin-bottom: 10px; padding-bottom: 10px; }
   nav {
     display: flex;
@@ -691,6 +770,10 @@ dialog {
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
+  .multiContactHeader,
+  .multiContactRow {
+    grid-template-columns: 1fr;
+  }
   .ocrText {
     min-height: 120px;
     max-height: 260px;
@@ -712,7 +795,7 @@ dialog {
     padding: 10px 9px;
   }
   .rowActions {
-    min-width: 260px;
+    min-width: 420px;
   }
   #toast {
     left: 12px;

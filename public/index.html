@@ -38,6 +38,7 @@
         </div>
         <div class="actions">
           <button id="addMainBtn" class="button">+ Add card</button>
+          <button id="importViewBtn" class="button secondary">Add list</button>
           <button id="exportViewBtn" class="button secondary">Clean exports</button>
         </div>
       </header>
@@ -407,16 +408,42 @@
           <input name="country" placeholder="Country" />
           <input name="city" placeholder="City" />
         </div>
-        <div class="split">
-          <input name="mobile" placeholder="Mobile / WhatsApp" />
-          <input name="phone" placeholder="Phone / Office" />
+        <div class="multiContactGroup" data-contact-field="email" data-contact-label="Email address">
+          <div class="multiContactHeader"><span>Email addresses</span><button class="button secondary tinyButton" type="button" data-add-contact="email">+ Add email</button></div>
+          <div class="multiContactInputs"></div>
+          <input name="email" type="hidden" />
         </div>
-        <input name="email" placeholder="Email" />
+        <div class="multiContactGroup" data-contact-field="mobile" data-contact-label="Mobile / WhatsApp">
+          <div class="multiContactHeader"><span>Mobile numbers</span><button class="button secondary tinyButton" type="button" data-add-contact="mobile">+ Add mobile</button></div>
+          <div class="multiContactInputs"></div>
+          <input name="mobile" type="hidden" />
+        </div>
+        <div class="multiContactGroup" data-contact-field="phone" data-contact-label="Phone / Office">
+          <div class="multiContactHeader"><span>Telephone numbers</span><button class="button secondary tinyButton" type="button" data-add-contact="phone">+ Add phone</button></div>
+          <div class="multiContactInputs"></div>
+          <input name="phone" type="hidden" />
+        </div>
         <input name="website" placeholder="Website" />
         <textarea name="notes" placeholder="Notes"></textarea>
         <div class="dialogActions">
           <button class="button secondary" value="cancel">Cancel</button>
           <button class="button" id="saveCustomerBtn" value="default">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="countryDialog">
+      <form method="dialog" id="countryForm" class="form dialogForm">
+        <h2>Move country</h2>
+        <p id="countryMoveName" class="hint"></p>
+        <label>
+          Country
+          <input name="country" list="countryOptions" placeholder="New country" required />
+        </label>
+        <datalist id="countryOptions"></datalist>
+        <div class="dialogActions">
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button class="button" id="saveCountryMoveBtn" value="default">Move</button>
         </div>
       </form>
     </dialog>

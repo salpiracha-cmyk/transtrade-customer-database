@@ -7,6 +7,7 @@ const state = {
   cardUploadBusy: false,
   dashboardSearchCustomers: [],
   editingCustomerId: null,
+  movingCountryCustomerId: null,
   outreachTestPassed: false,
   outreachPreviewTotal: 0
 };
@@ -27,6 +28,7 @@ document.querySelectorAll(".nav").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
 document.getElementById("addMainBtn").addEventListener("click", openAddDialog);
+document.getElementById("importViewBtn").addEventListener("click", () => switchView("import"));
 document.getElementById("exportViewBtn").addEventListener("click", () => switchView("exports"));
 document.getElementById("chooseCardBtn").addEventListener("click", () => {
   document.getElementById("addDialog").close();
@@ -46,6 +48,7 @@ document.getElementById("contactFilter").addEventListener("change", loadCustomer
 document.getElementById("sourceFilter").addEventListener("change", loadCustomers);
 document.getElementById("newCustomerBtn").addEventListener("click", openAddDialog);
 document.getElementById("saveCustomerBtn").addEventListener("click", saveManualCustomer);
+document.getElementById("saveCountryMoveBtn").addEventListener("click", saveCountryMove);
 document.getElementById("importForm").addEventListener("submit", importFile);
 document.getElementById("cardForm").addEventListener("submit", uploadCard);
 document.getElementById("quickCardForm").addEventListener("submit", uploadQuickCard);
@@ -82,6 +85,7 @@ document.getElementById("previewOutreachBtn").addEventListener("click", previewO
 document.getElementById("sendTestOutreachBtn").addEventListener("click", sendOutreachTest);
 document.getElementById("startOutreachBtn").addEventListener("click", startOutreachCampaign);
 document.getElementById("draftOutreachBtn").addEventListener("click", draftOutreachEmail);
+document.addEventListener("click", handleMultiContactClick);
 
 await refresh();
 await loadAiStatus();
@@ -118,11 +122,24 @@ function openCustomerDialog(customer = null) {
   form.querySelector("h2").textContent = customer ? "Edit customer" : "Add customer";
   document.getElementById("saveCustomerBtn").textContent = customer ? "Save changes" : "Save";
   if (customer) {
-    for (const field of ["company", "person", "role", "country", "city", "mobile", "phone", "email", "website", "notes"]) {
+    for (const field of ["company", "person", "role", "country", "city", "website", "notes"]) {
       if (form.elements[field]) form.elements[field].value = customer[field] || "";
     }
   }
+  initializeMultiContactFields(form, customer || {});
   dialog.showModal();
+}
+
+function openCountryMoveDialog(customer) {
+  if (!customer) return;
+  const dialog = document.getElementById("countryDialog");
+  const form = document.getElementById("countryForm");
+  form.reset();
+  state.movingCountryCustomerId = customer.id;
+  document.getElementById("countryMoveName").textContent = [customer.company, customer.person].filter(Boolean).join(" · ") || "Selected contact";
+  form.elements.country.value = customer.country || "";
+  dialog.showModal();
+  form.elements.country.focus();
 }
 
 function openCardDialog() {
@@ -192,6 +209,8 @@ async function loadSummary() {
   const selectedResearchSource = researchSourceFilter.value;
   researchSourceFilter.innerHTML = `<option value="">All sources</option>` + state.sourceTypes.map((s) => `<option value="${escapeHtml(s)}">${labelSource(s)}</option>`).join("");
   researchSourceFilter.value = selectedResearchSource;
+  const countryOptions = document.getElementById("countryOptions");
+  if (countryOptions) countryOptions.innerHTML = summary.countries.map((c) => `<option value="${escapeAttr(c)}"></option>`).join("");
 }
 
 function renderCountries(countries) {
@@ -263,13 +282,14 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
       <td><strong>${escapeHtml(c.company)}</strong><div class="muted">${escapeHtml(c.city || "")}</div></td>
       <td>${escapeHtml(c.country)}</td>
       <td>${escapeHtml(c.person)}<div class="muted">${escapeHtml(c.role || "")}</div></td>
-      <td>${escapeHtml(c.mobile || c.phone || "")}</td>
-      <td>${escapeHtml(c.email || "")}</td>
+      <td>${renderContactChips(c.mobile || c.phone || "")}</td>
+      <td>${renderContactChips(c.email || "")}</td>
       <td><span class="badge">${escapeHtml(labelSource(c.sourceType || ""))}</span></td>
       <td class="${escapeHtml(qualityFor(c))}">${labelQuality(qualityFor(c))}</td>
       <td class="rowActions">
         <a class="button secondary" href="/api/export.vcf?id=${encodeURIComponent(c.id)}">VCF</a>
         <button class="button secondary" data-edit-customer="${escapeHtml(c.id)}">Edit</button>
+        <button class="button secondary" data-move-country="${escapeHtml(c.id)}">Move country</button>
         <button class="button secondary" data-move-misc="${escapeHtml(c.id)}">Move to misc</button>
       </td>
     </tr>
@@ -294,6 +314,13 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
       toast("Moved to misc");
       await refresh();
       if (state.activeView === "companyContacts") await loadCompanyContacts();
+    });
+  });
+
+  body.querySelectorAll("[data-move-country]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const customer = [...state.customers, ...state.dashboardSearchCustomers].find((c) => c.id === button.dataset.moveCountry);
+      openCountryMoveDialog(customer);
     });
   });
 }
@@ -396,8 +423,8 @@ async function loadCompanyContacts() {
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
           <span>${escapeHtml(c.person || "(No person)")}</span>
           <span>${escapeHtml(c.role || "")}</span>
-          <span>${escapeHtml(c.mobile || c.phone || "No phone")}</span>
-          <span>${escapeHtml(c.email || "No email")}</span>
+        <span>${renderInlineContactList(c.mobile || c.phone || "No phone")}</span>
+        <span>${renderInlineContactList(c.email || "No email")}</span>
           <em>${escapeHtml(labelSource(c.sourceType || ""))} · ${escapeHtml(labelQuality(c.dataQuality || qualityFor(c)))}</em>
           <button class="button secondary contactArchiveBtn" data-contact-archive="${escapeHtml(c.id)}">Archive contact</button>
         </div>
@@ -442,10 +469,12 @@ function renderResearchRows(customers) {
         <input name="person" value="${escapeAttr(c.person || "")}" placeholder="Person" />
         <input name="country" value="${escapeAttr(c.country || "")}" placeholder="Country" />
         <input name="city" value="${escapeAttr(c.city || "")}" placeholder="City" />
-        <input name="mobile" value="${escapeAttr(c.mobile || "")}" placeholder="Mobile / WhatsApp" />
-        <input name="phone" value="${escapeAttr(c.phone || "")}" placeholder="Phone" />
-        <input name="email" value="${escapeAttr(c.email || "")}" placeholder="Email" />
         <input name="website" value="${escapeAttr(c.website || "")}" placeholder="Website" />
+      </div>
+      <div class="researchContactFields">
+        ${renderMultiContactEditor("email", c.email || "", "Email address", "+ Add email")}
+        ${renderMultiContactEditor("mobile", c.mobile || "", "Mobile / WhatsApp", "+ Add mobile")}
+        ${renderMultiContactEditor("phone", c.phone || "", "Phone / Office", "+ Add phone")}
       </div>
       <textarea name="notes" placeholder="Notes">${escapeHtml(c.notes || "")}</textarea>
       <div class="researchActions">
@@ -472,6 +501,7 @@ function renderResearchRows(customers) {
 async function saveResearchRecord(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  syncMultiContactFields(form);
   const values = Object.fromEntries(new FormData(form).entries());
   await api(`/api/customers/${form.dataset.researchId}`, {
     method: "PATCH",
@@ -494,6 +524,7 @@ function researchReason(c) {
 async function saveManualCustomer(event) {
   event.preventDefault();
   const form = document.getElementById("customerForm");
+  syncMultiContactFields(form);
   const values = Object.fromEntries(new FormData(form).entries());
   if (!values.company) return;
   const isEdit = Boolean(state.editingCustomerId);
@@ -508,6 +539,108 @@ async function saveManualCustomer(event) {
   toast(isEdit ? "Customer updated" : "Customer saved");
   await refresh();
   if (state.activeView === "companyContacts") await loadCompanyContacts();
+}
+
+async function saveCountryMove(event) {
+  event.preventDefault();
+  const form = document.getElementById("countryForm");
+  const country = form.elements.country.value.trim();
+  if (!state.movingCountryCustomerId || !country) return;
+  await api(`/api/customers/${state.movingCountryCustomerId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ country })
+  });
+  state.movingCountryCustomerId = null;
+  form.reset();
+  document.getElementById("countryDialog").close();
+  toast("Country moved");
+  await refresh();
+  if (state.activeView === "research") await loadResearch();
+  if (state.activeView === "companyContacts") await loadCompanyContacts();
+}
+
+function initializeMultiContactFields(form, values = {}) {
+  form.querySelectorAll(".multiContactGroup").forEach((group) => {
+    renderMultiContactGroup(group, values[group.dataset.contactField] || "");
+  });
+}
+
+function renderMultiContactEditor(field, value, label, addLabel) {
+  const items = splitContactValues(value);
+  const rows = (items.length ? items : [""]).map((item) => contactInputRow(field, item)).join("");
+  return `
+    <div class="multiContactGroup" data-contact-field="${escapeAttr(field)}" data-contact-label="${escapeAttr(label)}">
+      <div class="multiContactHeader"><span>${escapeHtml(label)}s</span><button class="button secondary tinyButton" type="button" data-add-contact="${escapeAttr(field)}">${escapeHtml(addLabel)}</button></div>
+      <div class="multiContactInputs">${rows}</div>
+      <input name="${escapeAttr(field)}" type="hidden" value="${escapeAttr(items.join("; "))}" />
+    </div>
+  `;
+}
+
+function renderMultiContactGroup(group, value) {
+  const field = group.dataset.contactField;
+  const items = splitContactValues(value);
+  group.querySelector(".multiContactInputs").innerHTML = (items.length ? items : [""]).map((item) => contactInputRow(field, item)).join("");
+  syncMultiContactGroup(group);
+}
+
+function contactInputRow(field, value = "") {
+  const type = field === "email" ? "email" : "text";
+  const placeholder = field === "email" ? "Email address" : field === "mobile" ? "Mobile / WhatsApp" : "Phone / Office";
+  return `
+    <div class="multiContactRow">
+      <input type="${type}" value="${escapeAttr(value)}" placeholder="${escapeAttr(placeholder)}" data-contact-value="${escapeAttr(field)}" />
+      <button class="button secondary tinyButton" type="button" data-remove-contact="${escapeAttr(field)}">Remove</button>
+    </div>
+  `;
+}
+
+function handleMultiContactClick(event) {
+  const addButton = event.target.closest("[data-add-contact]");
+  if (addButton) {
+    event.preventDefault();
+    const group = addButton.closest(".multiContactGroup");
+    group.querySelector(".multiContactInputs").insertAdjacentHTML("beforeend", contactInputRow(group.dataset.contactField));
+    syncMultiContactGroup(group);
+    group.querySelector(".multiContactInputs input:last-of-type")?.focus();
+    return;
+  }
+  const removeButton = event.target.closest("[data-remove-contact]");
+  if (removeButton) {
+    event.preventDefault();
+    const group = removeButton.closest(".multiContactGroup");
+    const rows = group.querySelectorAll(".multiContactRow");
+    if (rows.length > 1) {
+      removeButton.closest(".multiContactRow").remove();
+    } else {
+      rows[0].querySelector("input").value = "";
+    }
+    syncMultiContactGroup(group);
+  }
+}
+
+function syncMultiContactFields(form) {
+  form.querySelectorAll(".multiContactGroup").forEach(syncMultiContactGroup);
+}
+
+function syncMultiContactGroup(group) {
+  const hidden = group.querySelector(`input[name="${group.dataset.contactField}"]`);
+  if (!hidden) return;
+  const values = [...group.querySelectorAll("[data-contact-value]")]
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+  hidden.value = [...new Set(values)].join("; ");
+}
+
+function renderContactChips(value) {
+  const items = splitContactValues(value);
+  return items.length ? `<div class="contactChips">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : "";
+}
+
+function renderInlineContactList(value) {
+  const items = splitContactValues(value);
+  return items.length ? items.map(escapeHtml).join("<br>") : escapeHtml(value || "");
 }
 
 async function importFile(event) {
