@@ -28,4 +28,12 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
+"[$(Get-Date -Format s)] Creating buyer list by APP folder exports" | Tee-Object -FilePath $LogFile -Append
+node .\scripts\export-buyer-list-by-app.mjs 2>&1 | Tee-Object -FilePath $LogFile -Append
+
+if ($LASTEXITCODE -ne 0) {
+  "[$(Get-Date -Format s)] Buyer list by APP export failed with exit code $LASTEXITCODE" | Tee-Object -FilePath $LogFile -Append
+  exit $LASTEXITCODE
+}
+
 "[$(Get-Date -Format s)] Weekly live sync completed" | Tee-Object -FilePath $LogFile -Append

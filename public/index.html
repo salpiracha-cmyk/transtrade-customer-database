@@ -28,6 +28,7 @@
         <button class="nav" data-view="duplicates">Duplicates</button>
         <button class="nav" data-view="cards">Cards</button>
         <button class="nav" data-view="outreach">Outreach</button>
+        <button class="nav" data-view="settings">Settings</button>
       </nav>
     </aside>
 
@@ -41,6 +42,7 @@
           <button id="addMainBtn" class="button">+ Add card</button>
           <button id="importViewBtn" class="button secondary">Add list</button>
           <button id="exportViewBtn" class="button secondary">Clean exports</button>
+          <button id="settingsViewBtn" class="button secondary settingsButton" aria-label="Settings" title="Settings">Settings</button>
         </div>
       </header>
 
@@ -416,6 +418,62 @@
           <div id="outreachCampaigns" class="stack"></div>
         </section>
       </section>
+
+      <section id="settings" class="view">
+        <section class="panel">
+          <div class="panelHeader">
+            <div>
+              <h2>Settings</h2>
+              <p class="hint inlineHint">API keys stay in this app database and are not committed to GitHub. Use API keys, not account passwords.</p>
+            </div>
+            <button id="reloadSettingsBtn" class="button secondary" type="button">Reload</button>
+          </div>
+          <form id="settingsForm" class="form settingsForm">
+            <section class="settingsBlock">
+              <h2>Card Reader</h2>
+              <label>Reader order
+                <input name="aiProviderOrder" placeholder="gemini,openai,claude,ollama,ocr" />
+              </label>
+              <label>Gemini API key
+                <input name="geminiApiKey" autocomplete="off" placeholder="AIza..." />
+              </label>
+              <label>Gemini model
+                <input name="geminiModel" placeholder="gemini-2.5-flash" />
+              </label>
+              <label>OpenAI / ChatGPT API key
+                <input name="openaiApiKey" autocomplete="off" placeholder="sk-..." />
+              </label>
+              <label>OpenAI model
+                <input name="openaiModel" placeholder="gpt-4o" />
+              </label>
+              <label>Claude API key
+                <input name="claudeApiKey" autocomplete="off" placeholder="sk-ant-..." />
+              </label>
+              <label>Claude model
+                <input name="claudeModel" placeholder="claude-3-5-sonnet-latest" />
+              </label>
+              <label>Ollama URL
+                <input name="ollamaUrl" placeholder="http://127.0.0.1:11434" />
+              </label>
+              <label>Ollama vision model
+                <input name="ollamaVisionModel" placeholder="moondream" />
+              </label>
+            </section>
+            <section class="settingsBlock">
+              <h2>Server PC Weekly Export</h2>
+              <p class="hint inlineHint">The Monday task can create a local “buyer list by APP” folder with master and country-wise Excel files.</p>
+              <label>Server export folder
+                <input name="serverExportDir" placeholder="E:\\TTI DOCS\\TTI DOCS\\BUYER LIST\\buyer list software\\buyer list by APP" />
+              </label>
+            </section>
+            <div id="settingsStatus" class="statusBox"></div>
+            <div class="dialogActions">
+              <button id="runServerExportBtn" class="button secondary" type="button">Run server export now</button>
+              <button class="button" type="submit">Save settings</button>
+            </div>
+          </form>
+        </section>
+      </section>
     </main>
 
     <dialog id="customerDialog">
@@ -444,6 +502,8 @@
           <input name="phone" type="hidden" />
         </div>
         <input name="website" placeholder="Website" />
+        <input name="sourcePhoto" type="hidden" />
+        <div id="customerCardPhoto" class="customerCardPhoto hidden"></div>
         <textarea name="notes" placeholder="Notes"></textarea>
         <div class="dialogActions">
           <button class="button secondary" value="cancel">Cancel</button>

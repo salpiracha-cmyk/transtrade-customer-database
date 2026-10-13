@@ -25,6 +25,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || "";
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-3-5-sonnet-latest";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const RESEND_FROM_NAME = process.env.RESEND_FROM_NAME || "Transtrade International";
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "business@outreach.transtradeinternational.com";
@@ -149,7 +151,7 @@ async function ensureDirs() {
 
 async function ensureDb() {
   if (!fssync.existsSync(DB_PATH)) {
-    await writeDb({ customers: [], imports: [], events: [], suppressions: [], campaigns: [] });
+    await writeDb({ customers: [], imports: [], events: [], suppressions: [], campaigns: [], settings: defaultSettings() });
   }
 }
 
@@ -161,10 +163,87 @@ async function writeDb(db) {
   await fs.writeFile(DB_PATH, `${JSON.stringify(db, null, 2)}\n`);
 }
 
+function defaultSettings() {
+  return {
+    aiProviderOrder: process.env.AI_PROVIDER_ORDER || "gemini,openai,claude,ollama,ocr",
+    geminiApiKey: GEMINI_API_KEY,
+    geminiModel: GEMINI_MODEL,
+    openaiApiKey: OPENAI_API_KEY,
+    openaiModel: OPENAI_MODEL,
+    claudeApiKey: CLAUDE_API_KEY,
+    claudeModel: CLAUDE_MODEL,
+    ollamaUrl: OLLAMA_URL,
+    ollamaVisionModel: OLLAMA_VISION_MODEL,
+    serverExportDir: process.env.SERVER_EXPORT_DIR || path.join(__dirname, "outputs", "buyer list by APP")
+  };
+}
+
+function mergeSettings(current, body) {
+  const next = { ...defaultSettings(), ...current };
+  for (const key of Object.keys(defaultSettings())) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      const value = normalizeText(body[key]);
+      if (/ApiKey$/i.test(key) && value.includes("••••")) continue;
+      next[key] = value;
+    }
+  }
+  next.aiProviderOrder = normalizeProviderOrder(next.aiProviderOrder).join(",");
+  return next;
+}
+
+function publicSettings(settings) {
+  const merged = { ...defaultSettings(), ...settings };
+  return {
+    ...merged,
+    geminiApiKey: maskSecret(merged.geminiApiKey),
+    openaiApiKey: maskSecret(merged.openaiApiKey),
+    claudeApiKey: maskSecret(merged.claudeApiKey)
+  };
+}
+
+function maskSecret(value) {
+  const text = String(value || "");
+  if (!text) return "";
+  if (text.length <= 8) return "••••";
+  return `${text.slice(0, 4)}••••${text.slice(-4)}`;
+}
+
+function normalizeProviderOrder(value) {
+  const allowed = new Set(["gemini", "openai", "chatgpt", "claude", "ollama", "ocr"]);
+  const normalized = String(value || "")
+    .split(/[,\s]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => allowed.has(item))
+    .map((item) => item === "chatgpt" ? "openai" : item);
+  return [...new Set(normalized.length ? normalized : ["gemini", "openai", "claude", "ollama", "ocr"])];
+}
+
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/summary") {
     const db = await readDb();
     sendJson(res, 200, buildSummary(db));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/settings") {
+    const db = await readDb();
+    sendJson(res, 200, {
+      form: publicSettings(db.settings || defaultSettings()),
+      aiStatus: await getAiStatus(db.settings || {})
+    });
+    return;
+  }
+
+  if (req.method === "PATCH" && url.pathname === "/api/settings") {
+    const body = await readJson(req);
+    const db = await readDb();
+    db.settings = mergeSettings(db.settings || defaultSettings(), body);
+    db.events ||= [];
+    db.events.push(event("settings_updated", "settings", {
+      fields: Object.keys(body).filter((key) => !/key/i.test(key))
+    }));
+    await writeDb(db);
+    sendJson(res, 200, { saved: true, form: publicSettings(db.settings) });
     return;
   }
 
@@ -271,7 +350,8 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/ai/status") {
-    sendJson(res, 200, await getAiStatus());
+    const db = await readDb();
+    sendJson(res, 200, await getAiStatus(db.settings || {}));
     return;
   }
 
@@ -446,7 +526,8 @@ async function handleApi(req, res, url) {
     if (!savedPath.startsWith(CARD_DIR) || !fssync.existsSync(savedPath)) {
       return sendJson(res, 404, { error: "Card photo not found" });
     }
-    const ai = await runBestCardAi(savedPath, "", 120000);
+    const db = await readDb();
+    const ai = await runBestCardAi(savedPath, "", 120000, db.settings || {});
     sendJson(res, 200, {
       path: `uploads/cards/${filename}`,
       filename,
@@ -562,7 +643,8 @@ async function handleApi(req, res, url) {
         return;
       }
       const ocr = await runCardOcr(savedPath);
-      const ai = await runCardAi(savedPath, ocr.ocrText);
+      const db = await readDb();
+      const ai = await runBestCardAi(savedPath, ocr.ocrText, 120000, db.settings || {});
       sendJson(res, 201, {
         path: `uploads/cards/${savedName}`,
         filename: file.filename,
@@ -600,6 +682,16 @@ async function handleApi(req, res, url) {
       "content-disposition": `attachment; filename="${id ? "customer" : sanitizeFileName(exportLabel(url) || "contacts")}.vcf"`
     });
     res.end(body);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/server-export") {
+    const db = await readDb();
+    const result = await exportBuyerListByApp(db, db.settings || {});
+    db.events ||= [];
+    db.events.push(event("server_export_created", "server-export", result));
+    await writeDb(db);
+    sendJson(res, 200, result);
     return;
   }
 
@@ -689,68 +781,86 @@ async function runCardOcr(imagePath) {
   }
 }
 
-async function getAiStatus() {
-  if (OPENAI_API_KEY) {
+async function getAiStatus(settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
+  if (cfg.openaiApiKey) {
     return {
       aiStatus: "ready",
-      aiModel: OPENAI_MODEL,
+      aiModel: cfg.openaiModel,
       aiProvider: "openai",
       message: "OpenAI card reader is ready for sharper phone-card extraction."
     };
   }
-  if (GEMINI_API_KEY) {
+  if (cfg.geminiApiKey) {
     return {
       aiStatus: "ready",
-      aiModel: GEMINI_MODEL,
+      aiModel: cfg.geminiModel,
       aiProvider: "gemini",
       message: "Gemini card reader is ready for sharper phone-card extraction."
+    };
+  }
+  if (cfg.claudeApiKey) {
+    return {
+      aiStatus: "ready",
+      aiModel: cfg.claudeModel,
+      aiProvider: "claude",
+      message: "Claude card reader is ready for sharper phone-card extraction."
     };
   }
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
-    const response = await fetch(`${OLLAMA_URL}/api/tags`, { signal: controller.signal });
+    const ollamaUrl = (cfg.ollamaUrl || OLLAMA_URL).replace(/\/$/, "");
+    const ollamaModel = cfg.ollamaVisionModel || OLLAMA_VISION_MODEL;
+    const response = await fetch(`${ollamaUrl}/api/tags`, { signal: controller.signal });
     clearTimeout(timeout);
-    if (!response.ok) return { aiStatus: "error", aiModel: OLLAMA_VISION_MODEL, message: `Ollama returned HTTP ${response.status}` };
+    if (!response.ok) return { aiStatus: "error", aiModel: ollamaModel, message: `Ollama returned HTTP ${response.status}` };
     const body = await response.json();
     const models = (body.models || []).map((model) => model.name).filter(Boolean);
-    const exact = models.includes(OLLAMA_VISION_MODEL);
-    const familyMatch = models.some((name) => name.split(":")[0] === OLLAMA_VISION_MODEL.split(":")[0]);
+    const exact = models.includes(ollamaModel);
+    const familyMatch = models.some((name) => name.split(":")[0] === ollamaModel.split(":")[0]);
     return {
       aiStatus: exact || familyMatch ? "ready" : "model_missing",
-      aiModel: OLLAMA_VISION_MODEL,
-      ollamaUrl: OLLAMA_URL,
+      aiModel: ollamaModel,
+      ollamaUrl,
       models,
       message: exact || familyMatch
         ? "Free local AI is ready for card photos."
-        : `Ollama is running, but ${OLLAMA_VISION_MODEL} is not installed.`
+        : `Ollama is running, but ${ollamaModel} is not installed.`
     };
   } catch (error) {
     return {
       aiStatus: "unavailable",
-      aiModel: OLLAMA_VISION_MODEL,
-      ollamaUrl: OLLAMA_URL,
+      aiModel: cfg.ollamaVisionModel || OLLAMA_VISION_MODEL,
+      ollamaUrl: cfg.ollamaUrl || OLLAMA_URL,
       models: [],
       message: "Free local AI is not running on this PC yet."
     };
   }
 }
 
-async function runBestCardAi(imagePath, ocrText = "", timeoutMs = 120000) {
-  if (OPENAI_API_KEY) {
-    const openai = await runOpenAiCardAi(imagePath, ocrText, timeoutMs);
-    if (openai.aiStatus === "ok") return openai;
-    if (!GEMINI_API_KEY) return openai;
+async function runBestCardAi(imagePath, ocrText = "", timeoutMs = 120000, settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
+  let lastResult = null;
+  for (const provider of normalizeProviderOrder(cfg.aiProviderOrder)) {
+    if (provider === "gemini" && cfg.geminiApiKey) {
+      lastResult = await runGeminiCardAi(imagePath, ocrText, timeoutMs, cfg);
+    } else if (provider === "openai" && cfg.openaiApiKey) {
+      lastResult = await runOpenAiCardAi(imagePath, ocrText, timeoutMs, cfg);
+    } else if (provider === "claude" && cfg.claudeApiKey) {
+      lastResult = await runClaudeCardAi(imagePath, ocrText, timeoutMs, cfg);
+    } else if (provider === "ollama") {
+      lastResult = await runCardAi(imagePath, ocrText, timeoutMs, cfg);
+    } else if (provider === "ocr") {
+      lastResult = { aiStatus: "skipped", aiProvider: "ocr", aiModel: "local OCR", aiExtracted: extractCardFields(ocrText), aiText: ocrText };
+    }
+    if (lastResult?.aiStatus === "ok") return lastResult;
   }
-  if (GEMINI_API_KEY) {
-    const gemini = await runGeminiCardAi(imagePath, ocrText, timeoutMs);
-    if (gemini.aiStatus === "ok") return gemini;
-    return gemini;
-  }
-  return runCardAi(imagePath, ocrText, timeoutMs);
+  return lastResult || { aiStatus: "unavailable", aiExtracted: {}, message: "No card reader is configured." };
 }
 
-async function runOpenAiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
+async function runOpenAiCardAi(imagePath, ocrText = "", timeoutMs = 60000, settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
   try {
     const imageBase64 = await fs.readFile(imagePath, "base64");
     const controller = new AbortController();
@@ -758,12 +868,12 @@ async function runOpenAiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "authorization": `Bearer ${OPENAI_API_KEY}`,
+        "authorization": `Bearer ${cfg.openaiApiKey}`,
         "content-type": "application/json"
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model: cfg.openaiModel,
         temperature: 0,
         response_format: { type: "json_object" },
         max_tokens: 700,
@@ -799,14 +909,14 @@ async function runOpenAiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
     const bodyText = await response.text();
     if (!response.ok) {
       const errorMessage = parseOpenAiError(bodyText) || `OpenAI returned HTTP ${response.status}`;
-      return { aiStatus: "error", aiModel: OPENAI_MODEL, aiProvider: "openai", aiExtracted: {}, message: errorMessage };
+      return { aiStatus: "error", aiModel: cfg.openaiModel, aiProvider: "openai", aiExtracted: {}, message: errorMessage };
     }
     const body = JSON.parse(bodyText);
     const text = body.choices?.[0]?.message?.content || "";
     const parsed = parseAiJson(text);
     return {
       aiStatus: parsed ? "ok" : "empty",
-      aiModel: body.model || OPENAI_MODEL,
+      aiModel: body.model || cfg.openaiModel,
       aiProvider: "openai",
       aiExtracted: parsed || {},
       aiText: text
@@ -815,7 +925,7 @@ async function runOpenAiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
     const message = error.name === "AbortError"
       ? "OpenAI took too long on this card, so the app used the fallback reader."
       : "OpenAI is not available from this server PC right now.";
-    return { aiStatus: "unavailable", aiModel: OPENAI_MODEL, aiProvider: "openai", aiExtracted: {}, message };
+    return { aiStatus: "unavailable", aiModel: cfg.openaiModel, aiProvider: "openai", aiExtracted: {}, message };
   }
 }
 
@@ -827,12 +937,13 @@ function parseOpenAiError(text) {
   }
 }
 
-async function runGeminiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
+async function runGeminiCardAi(imagePath, ocrText = "", timeoutMs = 60000, settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
   try {
     const imageBase64 = await fs.readFile(imagePath, "base64");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.geminiModel)}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: controller.signal,
@@ -867,7 +978,7 @@ async function runGeminiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
     });
     clearTimeout(timeout);
     if (!response.ok) {
-      return { aiStatus: "error", aiModel: GEMINI_MODEL, aiProvider: "gemini", aiExtracted: {}, message: `Gemini returned HTTP ${response.status}` };
+      return { aiStatus: "error", aiModel: cfg.geminiModel, aiProvider: "gemini", aiExtracted: {}, message: `Gemini returned HTTP ${response.status}` };
     }
     const body = await response.json();
     const text = (body.candidates || [])
@@ -878,7 +989,7 @@ async function runGeminiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
     const parsed = parseAiJson(text);
     return {
       aiStatus: parsed ? "ok" : "empty",
-      aiModel: GEMINI_MODEL,
+      aiModel: cfg.geminiModel,
       aiProvider: "gemini",
       aiExtracted: parsed || {},
       aiText: text
@@ -887,21 +998,92 @@ async function runGeminiCardAi(imagePath, ocrText = "", timeoutMs = 60000) {
     const message = error.name === "AbortError"
       ? "Gemini took too long on this card, so the app used the fallback reader."
       : "Gemini is not available from this server PC right now.";
-    return { aiStatus: "unavailable", aiModel: GEMINI_MODEL, aiProvider: "gemini", aiExtracted: {}, message };
+    return { aiStatus: "unavailable", aiModel: cfg.geminiModel, aiProvider: "gemini", aiExtracted: {}, message };
   }
 }
 
-async function runCardAi(imagePath, ocrText = "", timeoutMs = 18000) {
+async function runClaudeCardAi(imagePath, ocrText = "", timeoutMs = 60000, settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
   try {
     const imageBase64 = await fs.readFile(imagePath, "base64");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": cfg.claudeApiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: cfg.claudeModel,
+        max_tokens: 700,
+        temperature: 0,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Extract business-card contact data for a customer database.",
+                "Return only one JSON object with these string keys:",
+                "company, person, role, country, city, mobile, phone, email, website, address, notes.",
+                "Use empty strings when unknown. Do not invent email, phone, country, or person names.",
+                "Copy phone numbers, emails, websites, and addresses exactly when readable.",
+                "Put WhatsApp/mobile numbers in mobile and landline numbers in phone.",
+                ocrText ? `Existing OCR text to cross-check:\n${ocrText}` : ""
+              ].filter(Boolean).join("\n")
+            },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: imageMimeType(imagePath),
+                data: imageBase64
+              }
+            }
+          ]
+        }]
+      })
+    });
+    clearTimeout(timeout);
+    const bodyText = await response.text();
+    if (!response.ok) {
+      return { aiStatus: "error", aiModel: cfg.claudeModel, aiProvider: "claude", aiExtracted: {}, message: `Claude returned HTTP ${response.status}: ${bodyText.slice(0, 180)}` };
+    }
+    const body = JSON.parse(bodyText);
+    const text = (body.content || []).map((part) => part.text || "").join("\n").trim();
+    const parsed = parseAiJson(text);
+    return {
+      aiStatus: parsed ? "ok" : "empty",
+      aiModel: body.model || cfg.claudeModel,
+      aiProvider: "claude",
+      aiExtracted: parsed || {},
+      aiText: text
+    };
+  } catch (error) {
+    const message = error.name === "AbortError"
+      ? "Claude took too long on this card, so the app used the next reader."
+      : "Claude is not available from this server PC right now.";
+    return { aiStatus: "unavailable", aiModel: cfg.claudeModel, aiProvider: "claude", aiExtracted: {}, message };
+  }
+}
+
+async function runCardAi(imagePath, ocrText = "", timeoutMs = 18000, settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
+  try {
+    const imageBase64 = await fs.readFile(imagePath, "base64");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const ollamaUrl = (cfg.ollamaUrl || OLLAMA_URL).replace(/\/$/, "");
+    const ollamaModel = cfg.ollamaVisionModel || OLLAMA_VISION_MODEL;
+    const response = await fetch(`${ollamaUrl}/api/generate`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: controller.signal,
       body: JSON.stringify({
-        model: OLLAMA_VISION_MODEL,
+        model: ollamaModel,
         stream: false,
         format: "json",
         keep_alive: "10m",
@@ -927,13 +1109,14 @@ async function runCardAi(imagePath, ocrText = "", timeoutMs = 18000) {
     });
     clearTimeout(timeout);
     if (!response.ok) {
-      return { aiStatus: "error", aiModel: OLLAMA_VISION_MODEL, message: `Free local AI returned HTTP ${response.status}` };
+      return { aiStatus: "error", aiModel: ollamaModel, aiProvider: "ollama", message: `Free local AI returned HTTP ${response.status}` };
     }
     const body = await response.json();
     const parsed = parseAiJson(body.response || "");
     return {
       aiStatus: parsed ? "ok" : "empty",
-      aiModel: body.model || OLLAMA_VISION_MODEL,
+      aiModel: body.model || ollamaModel,
+      aiProvider: "ollama",
       aiExtracted: parsed || {},
       aiText: body.response || ""
     };
@@ -941,7 +1124,7 @@ async function runCardAi(imagePath, ocrText = "", timeoutMs = 18000) {
     const message = error.name === "AbortError"
       ? "Free local AI is still too slow on this card, so the photo was saved for manual review."
       : "Free local AI is not available yet. Install/start Ollama on the server PC to enable it.";
-    return { aiStatus: "unavailable", aiModel: OLLAMA_VISION_MODEL, aiExtracted: {}, message };
+    return { aiStatus: "unavailable", aiModel: cfg.ollamaVisionModel || OLLAMA_VISION_MODEL, aiProvider: "ollama", aiExtracted: {}, message };
   }
 }
 
@@ -2168,6 +2351,59 @@ async function buildXlsx(customers, title) {
   zip.folder("xl").file("styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Arial"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>`);
   zip.folder("xl").folder("worksheets").file("sheet1.xml", buildSheetXml(rows));
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+async function exportBuyerListByApp(db, settings = {}) {
+  const cfg = { ...defaultSettings(), ...settings };
+  const root = path.resolve(cfg.serverExportDir || path.join(__dirname, "outputs", "buyer list by APP"));
+  const masterDir = path.join(root, "master");
+  await fs.mkdir(masterDir, { recursive: true });
+  const active = (db.customers || []).filter((customer) => !customer.archivedAt);
+  const buyers = active.filter((customer) => !isMiscellaneousContact(customer));
+  const date = new Date().toISOString().slice(0, 10);
+  const written = [];
+
+  const masterPath = path.join(masterDir, `master-buyers-${date}.xlsx`);
+  await fs.writeFile(masterPath, await buildXlsx(buyers, "Master Buyers"));
+  written.push(masterPath);
+
+  const countries = [...new Set(buyers.map((customer) => normalizeCountryName(customer.country)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const country of countries) {
+    const folderName = sanitizeFolderName(country);
+    const countryDir = path.join(root, folderName);
+    await fs.mkdir(countryDir, { recursive: true });
+    const countryCustomers = buyers.filter((customer) => normalizeCountryName(customer.country) === country);
+    const filePath = path.join(countryDir, `${folderName}-buyers-${date}.xlsx`);
+    await fs.writeFile(filePath, await buildXlsx(countryCustomers, country));
+    written.push(filePath);
+  }
+
+  const readme = [
+    "Transtrade buyer list by APP",
+    `Updated: ${new Date().toISOString()}`,
+    `Active buyer/trader records exported: ${buyers.length}`,
+    `Countries exported: ${countries.length}`,
+    "Miscellaneous contacts are excluded from these outreach folders."
+  ].join("\n");
+  await fs.writeFile(path.join(root, "README.txt"), `${readme}\n`);
+
+  return {
+    outputDir: root,
+    masterFile: masterPath,
+    countryCount: countries.length,
+    filesWritten: written.length,
+    countries
+  };
+}
+
+function sanitizeFolderName(value) {
+  return String(value || "Unknown")
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "Unknown";
 }
 
 function exportCustomerRow(c) {

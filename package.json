@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "export:master": "node scripts/export-master-workbook.mjs",
+    "export:buyer-app": "node scripts/export-buyer-list-by-app.mjs",
     "sync:live": "node scripts/sync-live-database.mjs",
     "sync:install-weekly-mac": "node scripts/install-weekly-live-sync.mjs"
   },

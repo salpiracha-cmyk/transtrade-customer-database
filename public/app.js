@@ -22,7 +22,8 @@ const titles = {
   import: ["Import", "Bring in clean Excel lists, verified workbooks, or card master files"],
   duplicates: ["Duplicates", "Review likely repeated customers before merging"],
   cards: ["Cards", "Save new card photos to the server"],
-  outreach: ["Outreach", "Campaign controls will use only verified, unsuppressed records"]
+  outreach: ["Outreach", "Campaign controls will use only verified, unsuppressed records"],
+  settings: ["Settings", "Reader, OCR, sync, and server export settings"]
 };
 
 document.querySelectorAll(".nav").forEach((button) => {
@@ -31,6 +32,7 @@ document.querySelectorAll(".nav").forEach((button) => {
 document.getElementById("addMainBtn").addEventListener("click", openAddDialog);
 document.getElementById("importViewBtn").addEventListener("click", () => switchView("import"));
 document.getElementById("exportViewBtn").addEventListener("click", () => switchView("exports"));
+document.getElementById("settingsViewBtn").addEventListener("click", () => switchView("settings"));
 document.getElementById("chooseCardBtn").addEventListener("click", () => {
   document.getElementById("addDialog").close();
   openCardDialog();
@@ -89,6 +91,9 @@ document.getElementById("previewOutreachBtn").addEventListener("click", previewO
 document.getElementById("sendTestOutreachBtn").addEventListener("click", sendOutreachTest);
 document.getElementById("startOutreachBtn").addEventListener("click", startOutreachCampaign);
 document.getElementById("draftOutreachBtn").addEventListener("click", draftOutreachEmail);
+document.getElementById("settingsForm").addEventListener("submit", saveSettings);
+document.getElementById("reloadSettingsBtn").addEventListener("click", loadSettings);
+document.getElementById("runServerExportBtn").addEventListener("click", runServerExport);
 document.addEventListener("click", handleMultiContactClick);
 
 await refresh();
@@ -113,6 +118,7 @@ function switchView(view) {
   if (view === "research") loadResearch();
   if (view === "cards") loadAiStatus();
   if (view === "outreach") loadOutreachStatus();
+  if (view === "settings") loadSettings();
 }
 
 function openAddDialog() {
@@ -127,12 +133,30 @@ function openCustomerDialog(customer = null) {
   form.querySelector("h2").textContent = customer ? "Edit customer" : "Add customer";
   document.getElementById("saveCustomerBtn").textContent = customer ? "Save changes" : "Save";
   if (customer) {
-    for (const field of ["company", "person", "role", "country", "city", "website", "notes"]) {
+    for (const field of ["company", "person", "role", "country", "city", "website", "sourcePhoto", "notes"]) {
       if (form.elements[field]) form.elements[field].value = customer[field] || "";
     }
   }
+  renderCustomerCardPhoto(customer?.sourcePhoto || "");
   initializeMultiContactFields(form, customer || {});
   dialog.showModal();
+}
+
+function renderCustomerCardPhoto(sourcePhoto) {
+  const box = document.getElementById("customerCardPhoto");
+  if (!box) return;
+  if (!sourcePhoto) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  const src = sourcePhoto.startsWith("/") ? sourcePhoto : `/${sourcePhoto}`;
+  box.classList.remove("hidden");
+  box.innerHTML = `
+    <strong>Attached card photo</strong>
+    <a href="${escapeAttr(src)}" target="_blank" rel="noopener">Open full card</a>
+    <img src="${escapeAttr(src)}" alt="Attached card photo" />
+  `;
 }
 
 function openCountryMoveDialog(customer) {
@@ -296,6 +320,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
       <td><span class="badge">${escapeHtml(labelSource(c.sourceType || ""))}</span></td>
       <td class="${escapeHtml(qualityFor(c))}">${labelQuality(qualityFor(c))}</td>
       <td class="rowActions">
+        ${renderCardAction(c.sourcePhoto)}
         <a class="button secondary" href="/api/export.vcf?id=${encodeURIComponent(c.id)}">VCF</a>
         <button class="button secondary" data-edit-customer="${escapeHtml(c.id)}">Edit</button>
         <button class="button secondary" data-move-country="${escapeHtml(c.id)}">Move country</button>
@@ -442,6 +467,7 @@ async function loadCompanyContacts() {
     <div class="contactGrid">
       ${data.customers.map((c) => `
         <div class="contactCard">
+          ${renderCardThumb(c.sourcePhoto)}
           <strong>${escapeHtml(c.company || "(No company)")}</strong>
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
           <span>${escapeHtml(c.person || "(No person)")}</span>
@@ -513,6 +539,7 @@ async function loadTraders() {
     <div class="contactGrid">
       ${data.customers.map((c) => `
         <div class="contactCard">
+          ${renderCardThumb(c.sourcePhoto)}
           <strong>${escapeHtml(c.company || "(No company)")}</strong>
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
           <span>${escapeHtml(c.person || "(No person)")}</span>
@@ -753,6 +780,18 @@ function syncMultiContactGroup(group) {
 function renderContactChips(value) {
   const items = splitContactValues(value);
   return items.length ? `<div class="contactChips">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : "";
+}
+
+function renderCardThumb(sourcePhoto) {
+  if (!sourcePhoto) return "";
+  const src = sourcePhoto.startsWith("/") ? sourcePhoto : `/${sourcePhoto}`;
+  return `<a class="cardThumb" href="${escapeAttr(src)}" target="_blank" rel="noopener"><img src="${escapeAttr(src)}" alt="Card photo" /><span>Card photo</span></a>`;
+}
+
+function renderCardAction(sourcePhoto) {
+  if (!sourcePhoto) return "";
+  const src = sourcePhoto.startsWith("/") ? sourcePhoto : `/${sourcePhoto}`;
+  return `<a class="button secondary" href="${escapeAttr(src)}" target="_blank" rel="noopener">Card</a>`;
 }
 
 function renderLabeledContactChips(label, value) {
@@ -1030,6 +1069,60 @@ async function loadOutreachCampaigns() {
       <span>${c.nextSendAt ? `Next: ${escapeHtml(new Date(c.nextSendAt).toLocaleString())}` : "No pending send"}</span>
     </div>
   `).join("") : `<span class="muted">No campaigns queued yet.</span>`;
+}
+
+async function loadSettings() {
+  const form = document.getElementById("settingsForm");
+  const statusBox = document.getElementById("settingsStatus");
+  if (!form) return;
+  try {
+    const settings = await api("/api/settings");
+    for (const [key, value] of Object.entries(settings.form || {})) {
+      if (form.elements[key]) form.elements[key].value = value || "";
+    }
+    statusBox.innerHTML = `
+      <strong>Reader status: ${escapeHtml(settings.aiStatus.message || settings.aiStatus.aiStatus || "unknown")}</strong>
+      <span>Configured provider order: ${escapeHtml(settings.form.aiProviderOrder || "gemini,openai,claude,ollama,ocr")}</span>
+    `;
+  } catch (error) {
+    statusBox.textContent = `Could not load settings: ${error.message}`;
+  }
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const statusBox = document.getElementById("settingsStatus");
+  try {
+    await api("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    toast("Settings saved");
+    await loadSettings();
+  } catch (error) {
+    statusBox.textContent = `Settings not saved: ${error.message}`;
+  }
+}
+
+async function runServerExport() {
+  const button = document.getElementById("runServerExportBtn");
+  const statusBox = document.getElementById("settingsStatus");
+  setBusyButton(button, "Exporting...");
+  try {
+    const result = await api("/api/server-export", { method: "POST" });
+    statusBox.innerHTML = `
+      <strong>Server export complete</strong>
+      <span>${escapeHtml(result.outputDir)} · ${result.countryCount} countries · ${result.filesWritten} files</span>
+    `;
+    toast("Server export complete");
+  } catch (error) {
+    statusBox.textContent = `Server export failed: ${error.message}`;
+  } finally {
+    setBusyButton(button, "");
+  }
 }
 
 function outreachPayload() {
