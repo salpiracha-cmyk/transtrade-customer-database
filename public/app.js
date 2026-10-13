@@ -591,6 +591,7 @@ async function loadResearch() {
   if (q) params.set("q", q);
   if (sourceType) params.set("sourceType", sourceType);
   const data = await api(`/api/customers?${params}`);
+  state.researchCustomers = data.customers;
   document.getElementById("researchSummary").innerHTML = data.total
     ? `<strong>${data.total}</strong> research-needed records found. Showing ${data.customers.length}.`
     : `No research-needed records match this filter.`;
@@ -600,35 +601,51 @@ async function loadResearch() {
 function renderResearchRows(customers) {
   const el = document.getElementById("researchRows");
   el.innerHTML = customers.length ? customers.map((c) => `
-    <form class="researchCard" data-research-id="${escapeHtml(c.id)}">
-      <div class="researchTop">
-        <strong>${escapeHtml(c.company || "(No company)")}</strong>
-        <span class="badge">${escapeHtml(labelSource(c.sourceType || ""))}</span>
-      </div>
-      <div class="researchReason">${escapeHtml(researchReason(c))}</div>
-      <div class="researchFields">
-        <input name="company" value="${escapeAttr(c.company || "")}" placeholder="Company" />
-        <input name="person" value="${escapeAttr(c.person || "")}" placeholder="Person" />
-        <input name="country" value="${escapeAttr(c.country || "")}" placeholder="Country" />
-        <input name="city" value="${escapeAttr(c.city || "")}" placeholder="City" />
-        <input name="website" value="${escapeAttr(c.website || "")}" placeholder="Website" />
-      </div>
-      <div class="researchContactFields">
-        ${renderMultiContactEditor("email", c.email || "", "Email address", "+ Add email")}
-        ${renderMultiContactEditor("mobile", c.mobile || "", "Mobile / WhatsApp", "+ Add mobile")}
-        ${renderMultiContactEditor("phone", c.phone || "", "Phone / Office", "+ Add phone")}
-      </div>
-      <textarea name="notes" placeholder="Notes">${escapeHtml(c.notes || "")}</textarea>
-      <div class="researchActions">
-        <button class="button" type="submit">Save</button>
+    <tr class="researchRow" data-research-row="${escapeHtml(c.id)}">
+      <td>
+        <form id="${escapeAttr(`researchForm-${c.id}`)}" class="researchRowForm" data-research-id="${escapeHtml(c.id)}">
+          <input name="company" value="${escapeAttr(c.company || "")}" placeholder="Company" />
+          <input name="person" value="${escapeAttr(c.person || "")}" placeholder="Person" />
+          <input name="role" value="${escapeAttr(c.role || "")}" placeholder="Position" />
+          <input name="website" value="${escapeAttr(c.website || "")}" placeholder="Website" />
+        </form>
+      </td>
+      <td>
+        <input name="country" form="${escapeAttr(`researchForm-${c.id}`)}" value="${escapeAttr(c.country || "")}" placeholder="Country" />
+        <input name="city" form="${escapeAttr(`researchForm-${c.id}`)}" value="${escapeAttr(c.city || "")}" placeholder="City" />
+      </td>
+      <td>
+        <div class="researchContactStack">
+          ${renderResearchContactInput(c.id, "email", c.email || "", "Email")}
+          ${renderResearchContactInput(c.id, "mobile", c.mobile || "", "Mobile")}
+          ${renderResearchContactInput(c.id, "phone", c.phone || "", "Phone")}
+        </div>
+      </td>
+      <td><div class="researchReason">${escapeHtml(researchReason(c))}</div></td>
+      <td>${renderResearchEvidence(c)}</td>
+      <td><textarea name="notes" form="${escapeAttr(`researchForm-${c.id}`)}" placeholder="Notes">${escapeHtml(c.notes || "")}</textarea></td>
+      <td class="rowActions">
+        <button class="button" type="button" data-research-save="${escapeHtml(c.id)}">Save</button>
+        <button class="button secondary" type="button" data-research-edit="${escapeHtml(c.id)}">Edit</button>
         <button class="button danger" type="button" data-research-delete="${escapeHtml(c.id)}">Delete</button>
-      </div>
-      <div class="muted">${escapeHtml([c.sourceFile, c.sourceSheet, c.sourceId].filter(Boolean).join(" · "))}</div>
-    </form>
-  `).join("") : `<span class="muted">No records to research.</span>`;
+      </td>
+    </tr>
+  `).join("") : `<tr><td colspan="7" class="muted">No records to research.</td></tr>`;
 
-  el.querySelectorAll(".researchCard").forEach((form) => {
+  el.querySelectorAll(".researchRowForm").forEach((form) => {
     form.addEventListener("submit", saveResearchRecord);
+  });
+  el.querySelectorAll("[data-research-save]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const form = document.getElementById(`researchForm-${button.dataset.researchSave}`);
+      if (form) await saveResearchRecord({ preventDefault() {}, currentTarget: form });
+    });
+  });
+  el.querySelectorAll("[data-research-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const customer = state.researchCustomers?.find((c) => c.id === button.dataset.researchEdit);
+      if (customer) openCustomerDialog(customer);
+    });
   });
   el.querySelectorAll("[data-research-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -638,6 +655,29 @@ function renderResearchRows(customers) {
       await loadResearch();
     });
   });
+}
+
+function renderResearchContactInput(id, field, value, label) {
+  return `
+    <label class="researchInlineField">${escapeHtml(label)}
+      <input name="${escapeAttr(field)}" form="${escapeAttr(`researchForm-${id}`)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(label)}" />
+    </label>
+  `;
+}
+
+function renderResearchEvidence(c) {
+  const refs = [labelSource(c.sourceType || ""), c.sourceFile, c.sourceSheet, c.sourceId].filter(Boolean).join(" · ");
+  if (c.sourcePhoto) {
+    const src = c.sourcePhoto.startsWith("/") ? c.sourcePhoto : `/${c.sourcePhoto}`;
+    return `
+      <a class="researchPhotoLink" href="${escapeAttr(src)}" target="_blank" rel="noopener">
+        <img src="${escapeAttr(src)}" alt="Card photo" />
+        <span>Open card</span>
+      </a>
+      <div class="muted">${escapeHtml(refs || "Card photo")}</div>
+    `;
+  }
+  return `<div class="sourceReference">${escapeHtml(refs || "List reference only")}</div>`;
 }
 
 async function saveResearchRecord(event) {
