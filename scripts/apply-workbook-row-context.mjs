@@ -102,7 +102,9 @@ function isContinuationCustomer(customer, context, index) {
 function isRowContextUnsafeSource(customer) {
   const sourceType = normalizeText(customer.sourceType);
   const sourceFile = normalizeText(customer.sourceFile);
-  return sourceType === "card_master" || sourceFile === "TTI_Sales_Master.xlsx";
+  return sourceType === "card_master"
+    || sourceFile === "TTI_Sales_Master.xlsx"
+    || sourceFile.endsWith("ALL TRANSTRADE1 CONTACTS.csv");
 }
 
 function looksLikeCompanyName(value) {

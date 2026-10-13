@@ -2105,7 +2105,9 @@ function inheritWorkbookRowContext(records) {
 function isRowContextUnsafeSource(record) {
   const sourceType = normalizeText(record.sourceType);
   const sourceFile = normalizeText(record.sourceFile);
-  return sourceType === "card_master" || sourceFile === "TTI_Sales_Master.xlsx";
+  return sourceType === "card_master"
+    || sourceFile === "TTI_Sales_Master.xlsx"
+    || sourceFile.endsWith("ALL TRANSTRADE1 CONTACTS.csv");
 }
 
 function workbookContextFrom(record) {
