@@ -96,6 +96,10 @@ async function startServer() {
         await handlePublicUnsubscribe(req, res, url);
         return;
       }
+      if (url.pathname === "/logout") {
+        sendLogoutPage(res);
+        return;
+      }
       if (APP_PASSWORD && !isAuthorized(req)) {
         requestAuth(res);
         return;
@@ -141,6 +145,30 @@ function requestAuth(res) {
     "content-type": "text/plain; charset=utf-8"
   });
   res.end("Login required");
+}
+
+function sendLogoutPage(res) {
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store"
+  });
+  res.end(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Logged out</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="loggedOutBody">
+  <main class="logoutScreen">
+    <section>
+      <h1>Logged out</h1>
+      <p>You can close this tab now. To open the database again, use the site link and enter the password.</p>
+    </section>
+  </main>
+</body>
+</html>`);
 }
 
 async function ensureDirs() {
@@ -268,8 +296,9 @@ async function handleApi(req, res, url) {
     if (query) {
       customers = customers.filter((c) => [c.company, c.person, c.email, c.mobile, c.phone, c.country, c.city, c.role].some((v) => String(v || "").toLowerCase().includes(query)));
     }
+    const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get("limit") || 300)));
     customers = sortCustomerList(customers).map(withCustomerCategory);
-    sendJson(res, 200, { customers: customers.slice(0, 1000), total: customers.length });
+    sendJson(res, 200, { customers: customers.slice(0, limit), total: customers.length, limit });
     return;
   }
 

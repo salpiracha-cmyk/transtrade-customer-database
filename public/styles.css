@@ -45,6 +45,12 @@ body {
   overflow: auto;
 }
 
+body.loggedOutBody {
+  display: block;
+  height: auto;
+  min-height: 100dvh;
+}
+
 .sidebar {
   background: var(--nav);
   color: white;

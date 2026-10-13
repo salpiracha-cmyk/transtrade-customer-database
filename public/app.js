@@ -276,6 +276,7 @@ async function loadCustomers() {
   if (quality) params.set("quality", quality);
   if (contact) params.set("contact", contact);
   if (sourceType) params.set("sourceType", sourceType);
+  params.set("limit", "250");
   const data = await api(`/api/customers?${params}`);
   state.customers = data.customers;
   renderCustomers(data.customers);
@@ -290,7 +291,7 @@ async function loadDashboardSearch() {
     renderCustomerRows([], "dashboardSearchRows", "Search results will appear here.");
     return;
   }
-  const params = new URLSearchParams({ q });
+  const params = new URLSearchParams({ q, limit: "120" });
   const data = await api(`/api/customers?${params}`);
   state.dashboardSearchCustomers = data.customers;
   summary.textContent = `${data.total} matching records. Showing ${data.customers.length}.`;
@@ -469,6 +470,7 @@ async function loadCompanyContacts() {
   const q = document.getElementById("companyContactSearch").value;
   const params = new URLSearchParams({ category: "miscellaneous" });
   if (q) params.set("q", q);
+  params.set("limit", "200");
   const data = await api(`/api/customers?${params}`);
   document.getElementById("companyContactsSummary").innerHTML = data.total
     ? `<strong>${data.total}</strong> miscellaneous contacts loaded. These stay out of outreach exports.`
@@ -540,6 +542,7 @@ async function loadTraders() {
   const params = new URLSearchParams({ category: "trader" });
   if (q) params.set("q", q);
   if (country) params.set("country", country);
+  params.set("limit", "200");
   const data = await api(`/api/customers?${params}`);
   document.getElementById("tradersSummary").innerHTML = data.total
     ? `<strong>${data.total}</strong> trader contacts loaded${country ? ` for ${escapeHtml(country)}` : ""}.`
@@ -609,6 +612,7 @@ async function loadResearch() {
   const params = new URLSearchParams({ quality: "research_needed", category: "buyer" });
   if (q) params.set("q", q);
   if (sourceType) params.set("sourceType", sourceType);
+  params.set("limit", "200");
   const data = await api(`/api/customers?${params}`);
   state.researchCustomers = data.customers;
   document.getElementById("researchSummary").innerHTML = data.total
@@ -684,20 +688,7 @@ function renderResearchInfo(items, emptyText) {
 }
 
 async function logout() {
-  try {
-    await fetch("/", {
-      headers: { authorization: "Basic " + btoa("logout:logout") },
-      cache: "no-store"
-    });
-  } catch {}
-  document.body.innerHTML = `
-    <main class="logoutScreen">
-      <section>
-        <h1>Logged out</h1>
-        <p>Close this tab to fully clear the browser login.</p>
-      </section>
-    </main>
-  `;
+  window.location.href = "/logout";
 }
 
 async function saveResearchRecord(event) {
