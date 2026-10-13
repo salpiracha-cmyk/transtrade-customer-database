@@ -675,6 +675,44 @@ function refreshSoon() {
   }, 600);
 }
 
+function reloadActiveViewSoon() {
+  setTimeout(() => {
+    if (state.activeView === "customers") loadCustomers().catch(() => {});
+    if (state.activeView === "research") loadResearch().catch(() => {});
+    if (state.activeView === "traders") loadTraders().catch(() => {});
+    if (state.activeView === "companyContacts") loadCompanyContacts().catch(() => {});
+  }, 0);
+}
+
+function normalizeCountryInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const exact = state.countries.find((country) => country.toLowerCase() === raw.toLowerCase());
+  if (exact) return exact;
+  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const aliases = {
+    dxb: "United Arab Emirates",
+    dubai: "United Arab Emirates",
+    emirates: "United Arab Emirates",
+    ksa: "Saudi Arabia",
+    saudi: "Saudi Arabia",
+    saudiarabia: "Saudi Arabia",
+    uae: "United Arab Emirates",
+    unitedarabemirates: "United Arab Emirates",
+    unitedstatesofamerica: "United States",
+    usa: "United States",
+    us: "United States",
+    uk: "United Kingdom",
+    unitedkingdom: "United Kingdom"
+  };
+  return aliases[key] || raw;
+}
+
+function normalizeCountryFields(values) {
+  if (values.country) values.country = normalizeCountryInput(values.country);
+  return values;
+}
+
 function cssEscape(value) {
   if (window.CSS?.escape) return CSS.escape(value);
   return String(value || "").replace(/"/g, '\\"');
@@ -716,15 +754,15 @@ async function saveResearchRecord(event) {
   event.preventDefault();
   const form = event.currentTarget;
   syncMultiContactFields(form);
-  const values = Object.fromEntries(new FormData(form).entries());
+  const values = normalizeCountryFields(Object.fromEntries(new FormData(form).entries()));
   await api(`/api/customers/${form.dataset.researchId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(values)
   });
   toast("Saved");
-  await refresh();
-  await loadResearch();
+  refreshSoon();
+  reloadActiveViewSoon();
 }
 
 function researchReason(c) {
@@ -739,7 +777,7 @@ async function saveManualCustomer(event) {
   event.preventDefault();
   const form = document.getElementById("customerForm");
   syncMultiContactFields(form);
-  const values = Object.fromEntries(new FormData(form).entries());
+  const values = normalizeCountryFields(Object.fromEntries(new FormData(form).entries()));
   if (!values.company) return;
   const isEdit = Boolean(state.editingCustomerId);
   await api(isEdit ? `/api/customers/${state.editingCustomerId}` : "/api/customers", {
@@ -751,15 +789,14 @@ async function saveManualCustomer(event) {
   state.editingCustomerId = null;
   document.getElementById("customerDialog").close();
   toast(isEdit ? "Customer updated" : "Customer saved");
-  await refresh();
-  if (state.activeView === "traders") await loadTraders();
-  if (state.activeView === "companyContacts") await loadCompanyContacts();
+  refreshSoon();
+  reloadActiveViewSoon();
 }
 
 async function saveCountryMove(event) {
   event.preventDefault();
   const form = document.getElementById("countryForm");
-  const country = form.elements.country.value.trim();
+  const country = normalizeCountryInput(form.elements.country.value);
   if (!state.movingCountryCustomerId || !country) return;
   await api(`/api/customers/${state.movingCountryCustomerId}`, {
     method: "PATCH",
@@ -770,10 +807,8 @@ async function saveCountryMove(event) {
   form.reset();
   document.getElementById("countryDialog").close();
   toast("Country moved");
-  await refresh();
-  if (state.activeView === "research") await loadResearch();
-  if (state.activeView === "traders") await loadTraders();
-  if (state.activeView === "companyContacts") await loadCompanyContacts();
+  refreshSoon();
+  reloadActiveViewSoon();
 }
 
 function initializeMultiContactFields(form, values = {}) {
@@ -881,10 +916,13 @@ async function importFile(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
+  const country = normalizeCountryInput(data.get("country"));
+  if (country) data.set("country", country);
   const result = await api("/api/import", { method: "POST", body: data });
   toast(`Imported ${result.importedCount} records`);
   form.reset();
-  await refresh();
+  refreshSoon();
+  reloadActiveViewSoon();
 }
 
 async function uploadCard(event) {
@@ -1348,7 +1386,7 @@ function hideProcessing() {
 async function saveOcrCustomer(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const values = Object.fromEntries(new FormData(form).entries());
+  const values = normalizeCountryFields(Object.fromEntries(new FormData(form).entries()));
   if (!values.company && !values.person && !values.mobile && !values.email) return;
   await api("/api/customers", {
     method: "POST",
@@ -1358,7 +1396,8 @@ async function saveOcrCustomer(event) {
   form.reset();
   discardOcrReview();
   toast("Card contact saved");
-  await refresh();
+  refreshSoon();
+  reloadActiveViewSoon();
 }
 
 function discardOcrReview() {

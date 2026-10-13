@@ -266,7 +266,7 @@
                 <option value="tti_card_master">TTI Sales Master card database</option>
               </select>
             </label>
-            <label>Country fallback <input name="country" placeholder="Optional if file has no country column" /></label>
+            <label>Country fallback <input name="country" list="countryOptions" placeholder="Optional if file has no country column" /></label>
             <button class="button" type="submit">Import file</button>
           </form>
           <p class="hint">Clean Excel imports have the highest trust. TTI card master imports are kept as historical card-derived contacts until verified.</p>
@@ -331,7 +331,7 @@
                   <input name="person" placeholder="Person" />
                   <input name="role" placeholder="Role" />
                   <div class="split">
-                    <input name="country" placeholder="Country" />
+                    <input name="country" list="countryOptions" placeholder="Country" />
                     <input name="city" placeholder="City" />
                   </div>
                   <div class="split">
@@ -500,7 +500,7 @@
         <input name="person" placeholder="Person" />
         <input name="role" placeholder="Role" />
         <div class="split">
-          <input name="country" placeholder="Country" />
+          <input name="country" list="countryOptions" placeholder="Country" />
           <input name="city" placeholder="City" />
         </div>
         <div class="multiContactGroup" data-contact-field="email" data-contact-label="Email address">
