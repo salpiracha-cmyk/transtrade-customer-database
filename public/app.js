@@ -9,7 +9,8 @@ const state = {
   editingCustomerId: null,
   movingCountryCustomerId: null,
   outreachTestPassed: false,
-  outreachPreviewTotal: 0
+  outreachPreviewTotal: 0,
+  refreshTimer: null
 };
 
 const titles = {
@@ -338,9 +339,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
   body.querySelectorAll("[data-row-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       await archiveCustomer(button.dataset.rowDelete, "Deleted from active list");
-      await refresh();
-      if (targetId === "dashboardSearchRows") await loadDashboardSearch();
-      if (targetId === "customerRows") await loadCustomers();
+      removeCustomerFromPage(button.dataset.rowDelete);
     });
   });
 
@@ -530,8 +529,7 @@ async function loadCompanyContacts() {
   el.querySelectorAll("[data-contact-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
       await archiveCustomer(button.dataset.contactArchive, "Deleted from active list");
-      await refresh();
-      await loadCompanyContacts();
+      removeCustomerFromPage(button.dataset.contactArchive);
     });
   });
 }
@@ -600,8 +598,7 @@ async function loadTraders() {
   el.querySelectorAll("[data-trader-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
       await archiveCustomer(button.dataset.traderArchive, "Deleted from active list");
-      await refresh();
-      await loadTraders();
+      removeCustomerFromPage(button.dataset.traderArchive);
     });
   });
 }
@@ -647,8 +644,7 @@ function renderResearchRows(customers) {
   el.querySelectorAll("[data-research-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       await archiveCustomer(button.dataset.researchDelete, "Deleted from active list");
-      await refresh();
-      await loadResearch();
+      removeCustomerFromPage(button.dataset.researchDelete);
     });
   });
 }
@@ -657,6 +653,31 @@ async function archiveCustomer(id, message = "Deleted from active list") {
   if (!id) return;
   await api(`/api/customers/${id}`, { method: "DELETE" });
   toast(message);
+}
+
+function removeCustomerFromPage(id) {
+  state.customers = state.customers.filter((customer) => customer.id !== id);
+  state.dashboardSearchCustomers = state.dashboardSearchCustomers.filter((customer) => customer.id !== id);
+  state.researchCustomers = (state.researchCustomers || []).filter((customer) => customer.id !== id);
+  document.querySelectorAll(`[data-row-delete="${cssEscape(id)}"], [data-research-delete="${cssEscape(id)}"]`).forEach((button) => {
+    button.closest("tr")?.remove();
+  });
+  document.querySelectorAll(`[data-contact-archive="${cssEscape(id)}"], [data-trader-archive="${cssEscape(id)}"]`).forEach((button) => {
+    button.closest(".contactCard")?.remove();
+  });
+  refreshSoon();
+}
+
+function refreshSoon() {
+  clearTimeout(state.refreshTimer);
+  state.refreshTimer = setTimeout(() => {
+    refresh().catch(() => {});
+  }, 600);
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return CSS.escape(value);
+  return String(value || "").replace(/"/g, '\\"');
 }
 
 function renderResearchEvidence(c) {

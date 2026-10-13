@@ -37,6 +37,8 @@ const APP_USER = process.env.APP_USER || "tti";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const execFileAsync = promisify(execFile);
 let outreachProcessing = false;
+let dbCache = null;
+let dbCacheMtimeMs = 0;
 
 const SOURCE_TRUST = {
   "clean_excel": 100,
@@ -184,11 +186,20 @@ async function ensureDb() {
 }
 
 async function readDb() {
-  return JSON.parse(await fs.readFile(DB_PATH, "utf8"));
+  const stat = await fs.stat(DB_PATH);
+  if (dbCache && dbCacheMtimeMs === stat.mtimeMs) return dbCache;
+  dbCache = JSON.parse(await fs.readFile(DB_PATH, "utf8"));
+  dbCacheMtimeMs = stat.mtimeMs;
+  return dbCache;
 }
 
 async function writeDb(db) {
-  await fs.writeFile(DB_PATH, `${JSON.stringify(db, null, 2)}\n`);
+  const tmpPath = `${DB_PATH}.tmp-${process.pid}-${Date.now()}`;
+  await fs.writeFile(tmpPath, `${JSON.stringify(db)}\n`);
+  await fs.rename(tmpPath, DB_PATH);
+  const stat = await fs.stat(DB_PATH);
+  dbCache = db;
+  dbCacheMtimeMs = stat.mtimeMs;
 }
 
 function defaultSettings() {
