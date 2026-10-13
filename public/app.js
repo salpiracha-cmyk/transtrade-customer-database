@@ -307,11 +307,12 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
   for (const c of customers) {
     const category = c.listCategory || "Potential Buyer";
     if (category !== lastCategory) {
-      rows.push(`<tr class="listSectionRow"><td colspan="8">${escapeHtml(category === "Miscellaneous" ? "Miscellaneous" : category === "Traders" ? "Traders" : "Potential Buyers")}</td></tr>`);
+      rows.push(`<tr class="listSectionRow"><td colspan="9">${escapeHtml(category === "Miscellaneous" ? "Miscellaneous" : category === "Traders" ? "Traders" : "Potential Buyers")}</td></tr>`);
       lastCategory = category;
     }
     rows.push(`
     <tr>
+      <td><button class="deleteBox" type="button" data-row-delete="${escapeHtml(c.id)}" title="Delete">-</button></td>
       <td><strong>${escapeHtml(c.company)}</strong><div class="muted">${escapeHtml(c.city || "")}</div></td>
       <td>${escapeHtml(c.country)}</td>
       <td>${escapeHtml(c.person)}<div class="muted">${escapeHtml(c.role || "")}</div></td>
@@ -330,7 +331,16 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
     </tr>
   `);
   }
-  body.innerHTML = customers.length ? rows.join("") : `<tr><td colspan="8" class="muted">${escapeHtml(emptyMessage)}</td></tr>`;
+  body.innerHTML = customers.length ? rows.join("") : `<tr><td colspan="9" class="muted">${escapeHtml(emptyMessage)}</td></tr>`;
+
+  body.querySelectorAll("[data-row-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await archiveCustomer(button.dataset.rowDelete, "Deleted from active list");
+      await refresh();
+      if (targetId === "dashboardSearchRows") await loadDashboardSearch();
+      if (targetId === "customerRows") await loadCustomers();
+    });
+  });
 
   body.querySelectorAll("[data-edit-customer]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -403,7 +413,7 @@ async function loadDuplicates() {
             <span>${escapeHtml(c.person || "")}<em>${escapeHtml(c.email || c.mobile || c.phone || "No contact")}</em></span>
             <span>${escapeHtml(labelSource(c.sourceType || ""))}<em>trust ${escapeHtml(c.sourceTrust || "")} · score ${escapeHtml(c.duplicateScore || "")}</em></span>
             <span class="${escapeHtml(c.dataQuality || qualityFor(c))}">${escapeHtml(labelQuality(c.dataQuality || qualityFor(c)))}</span>
-            <span><button class="button danger tinyButton" data-dupe-archive="${escapeHtml(c.id)}" type="button">Delete</button></span>
+            <span><button class="deleteBox" data-dupe-archive="${escapeHtml(c.id)}" type="button" title="Delete">-</button></span>
           </div>
         `).join("")}
       </div>
@@ -467,6 +477,7 @@ async function loadCompanyContacts() {
     <div class="contactGrid">
       ${data.customers.map((c) => `
         <div class="contactCard">
+          <button class="deleteBox cardDeleteBox" data-contact-archive="${escapeHtml(c.id)}" type="button" title="Delete">-</button>
           ${renderCardThumb(c.sourcePhoto)}
           <strong>${escapeHtml(c.company || "(No company)")}</strong>
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
@@ -480,7 +491,6 @@ async function loadCompanyContacts() {
             <button class="button secondary" data-contact-edit="${escapeHtml(c.id)}">Edit</button>
             <button class="button secondary" data-contact-country="${escapeHtml(c.id)}">Move country</button>
             <button class="button secondary" data-contact-buyer="${escapeHtml(c.id)}">Move to buyers</button>
-            <button class="button danger" data-contact-archive="${escapeHtml(c.id)}">Archive</button>
           </div>
         </div>
       `).join("")}
@@ -516,8 +526,7 @@ async function loadCompanyContacts() {
 
   el.querySelectorAll("[data-contact-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await fetch(`/api/customers/${button.dataset.contactArchive}`, { method: "DELETE" });
-      toast("Contact archived");
+      await archiveCustomer(button.dataset.contactArchive, "Deleted from active list");
       await refresh();
       await loadCompanyContacts();
     });
@@ -539,6 +548,7 @@ async function loadTraders() {
     <div class="contactGrid">
       ${data.customers.map((c) => `
         <div class="contactCard">
+          <button class="deleteBox cardDeleteBox" data-trader-archive="${escapeHtml(c.id)}" type="button" title="Delete">-</button>
           ${renderCardThumb(c.sourcePhoto)}
           <strong>${escapeHtml(c.company || "(No company)")}</strong>
           <span>${escapeHtml([c.country, c.city].filter(Boolean).join(" · "))}</span>
@@ -582,6 +592,14 @@ async function loadTraders() {
       await loadTraders();
     });
   });
+
+  el.querySelectorAll("[data-trader-archive]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await archiveCustomer(button.dataset.traderArchive, "Deleted from active list");
+      await refresh();
+      await loadTraders();
+    });
+  });
 }
 
 async function loadResearch() {
@@ -602,6 +620,7 @@ function renderResearchRows(customers) {
   const el = document.getElementById("researchRows");
   el.innerHTML = customers.length ? customers.map((c) => `
     <tr class="researchRow" data-research-row="${escapeHtml(c.id)}">
+      <td><button class="deleteBox" type="button" data-research-delete="${escapeHtml(c.id)}" title="Delete">-</button></td>
       <td>
         <form id="${escapeAttr(`researchForm-${c.id}`)}" class="researchRowForm" data-research-id="${escapeHtml(c.id)}">
           <input name="company" value="${escapeAttr(c.company || "")}" placeholder="Company" />
@@ -627,10 +646,9 @@ function renderResearchRows(customers) {
       <td class="rowActions">
         <button class="button" type="button" data-research-save="${escapeHtml(c.id)}">Save</button>
         <button class="button secondary" type="button" data-research-edit="${escapeHtml(c.id)}">Edit</button>
-        <button class="button danger" type="button" data-research-delete="${escapeHtml(c.id)}">Delete</button>
       </td>
     </tr>
-  `).join("") : `<tr><td colspan="7" class="muted">No records to research.</td></tr>`;
+  `).join("") : `<tr><td colspan="8" class="muted">No records to research.</td></tr>`;
 
   el.querySelectorAll(".researchRowForm").forEach((form) => {
     form.addEventListener("submit", saveResearchRecord);
@@ -649,12 +667,17 @@ function renderResearchRows(customers) {
   });
   el.querySelectorAll("[data-research-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await fetch(`/api/customers/${button.dataset.researchDelete}`, { method: "DELETE" });
-      toast("Deleted from active list");
+      await archiveCustomer(button.dataset.researchDelete, "Deleted from active list");
       await refresh();
       await loadResearch();
     });
   });
+}
+
+async function archiveCustomer(id, message = "Deleted from active list") {
+  if (!id) return;
+  await api(`/api/customers/${id}`, { method: "DELETE" });
+  toast(message);
 }
 
 function renderResearchContactInput(id, field, value, label) {

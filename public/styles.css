@@ -133,6 +133,20 @@ p { margin: 0; }
 .button.secondary, .iconButton { background: var(--soft-green); color: #163b2b; }
 .button.danger { background: #b42318; color: white; }
 .iconButton { width: 38px; font-size: 18px; }
+.deleteBox {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border: 0;
+  background: #b42318;
+  color: white;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 800;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
 .settingsButton {
   min-width: 44px;
 }
@@ -451,6 +465,7 @@ td {
   gap: 10px;
 }
 .contactCard {
+  position: relative;
   display: grid;
   gap: 5px;
   border: 1px solid var(--line);
@@ -460,7 +475,7 @@ td {
 }
 .cardThumb {
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: 96px 1fr;
   gap: 8px;
   align-items: center;
   color: #163b2b;
@@ -469,11 +484,14 @@ td {
   font-weight: 700;
 }
 .cardThumb img {
-  width: 56px;
-  height: 42px;
-  object-fit: cover;
+  width: 96px;
+  height: 72px;
+  object-fit: contain;
   border: 1px solid var(--line);
   background: #fffef8;
+}
+.cardDeleteBox {
+  justify-self: start;
 }
 .contactCard span,
 .contactCard em {
@@ -532,12 +550,12 @@ td {
   color: #163b2b;
   font-weight: 700;
   text-decoration: none;
-  max-width: 132px;
+  max-width: 180px;
 }
 .researchPhotoLink img {
-  width: 132px;
-  height: 88px;
-  object-fit: cover;
+  width: 180px;
+  height: 120px;
+  object-fit: contain;
   border: 1px solid var(--line);
   background: #fffef8;
 }
@@ -641,9 +659,10 @@ td {
 }
 .customerCardPhoto img {
   width: 100%;
-  max-height: 260px;
+  max-height: 420px;
   object-fit: contain;
   border: 1px solid var(--line);
+  background: #fffef8;
 }
 .customerCardPhoto a {
   color: #163b2b;
