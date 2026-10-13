@@ -33,6 +33,7 @@ document.getElementById("addMainBtn").addEventListener("click", openAddDialog);
 document.getElementById("importViewBtn").addEventListener("click", () => switchView("import"));
 document.getElementById("exportViewBtn").addEventListener("click", () => switchView("exports"));
 document.getElementById("settingsViewBtn").addEventListener("click", () => switchView("settings"));
+document.getElementById("logoutBtn").addEventListener("click", logout);
 document.getElementById("chooseCardBtn").addEventListener("click", () => {
   document.getElementById("addDialog").close();
   openCardDialog();
@@ -621,44 +622,18 @@ function renderResearchRows(customers) {
   el.innerHTML = customers.length ? customers.map((c) => `
     <tr class="researchRow" data-research-row="${escapeHtml(c.id)}">
       <td><button class="deleteBox" type="button" data-research-delete="${escapeHtml(c.id)}" title="Delete">-</button></td>
-      <td>
-        <form id="${escapeAttr(`researchForm-${c.id}`)}" class="researchRowForm" data-research-id="${escapeHtml(c.id)}">
-          <input name="company" value="${escapeAttr(c.company || "")}" placeholder="Company" />
-          <input name="person" value="${escapeAttr(c.person || "")}" placeholder="Person" />
-          <input name="role" value="${escapeAttr(c.role || "")}" placeholder="Position" />
-          <input name="website" value="${escapeAttr(c.website || "")}" placeholder="Website" />
-        </form>
-      </td>
-      <td>
-        <input name="country" form="${escapeAttr(`researchForm-${c.id}`)}" value="${escapeAttr(c.country || "")}" placeholder="Country" />
-        <input name="city" form="${escapeAttr(`researchForm-${c.id}`)}" value="${escapeAttr(c.city || "")}" placeholder="City" />
-      </td>
-      <td>
-        <div class="researchContactStack">
-          ${renderResearchContactInput(c.id, "email", c.email || "", "Email")}
-          ${renderResearchContactInput(c.id, "mobile", c.mobile || "", "Mobile")}
-          ${renderResearchContactInput(c.id, "phone", c.phone || "", "Phone")}
-        </div>
-      </td>
+      <td>${renderResearchInfo([["Company", c.company], ["Person", c.person], ["Position", c.role], ["Website", c.website]], "No company/person details")}</td>
+      <td>${renderResearchInfo([["Country", c.country], ["City", c.city]], "No country/city")}</td>
+      <td>${renderResearchInfo([["Email", c.email], ["Mobile", c.mobile], ["Phone", c.phone]], "No contact route")}</td>
       <td><div class="researchReason">${escapeHtml(researchReason(c))}</div></td>
       <td>${renderResearchEvidence(c)}</td>
-      <td><textarea name="notes" form="${escapeAttr(`researchForm-${c.id}`)}" placeholder="Notes">${escapeHtml(c.notes || "")}</textarea></td>
+      <td><div class="researchNotes">${escapeHtml(c.notes || "") || `<span class="muted">No notes</span>`}</div></td>
       <td class="rowActions">
-        <button class="button" type="button" data-research-save="${escapeHtml(c.id)}">Save</button>
         <button class="button secondary" type="button" data-research-edit="${escapeHtml(c.id)}">Edit</button>
       </td>
     </tr>
   `).join("") : `<tr><td colspan="8" class="muted">No records to research.</td></tr>`;
 
-  el.querySelectorAll(".researchRowForm").forEach((form) => {
-    form.addEventListener("submit", saveResearchRecord);
-  });
-  el.querySelectorAll("[data-research-save]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const form = document.getElementById(`researchForm-${button.dataset.researchSave}`);
-      if (form) await saveResearchRecord({ preventDefault() {}, currentTarget: form });
-    });
-  });
   el.querySelectorAll("[data-research-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const customer = state.researchCustomers?.find((c) => c.id === button.dataset.researchEdit);
@@ -680,14 +655,6 @@ async function archiveCustomer(id, message = "Deleted from active list") {
   toast(message);
 }
 
-function renderResearchContactInput(id, field, value, label) {
-  return `
-    <label class="researchInlineField">${escapeHtml(label)}
-      <input name="${escapeAttr(field)}" form="${escapeAttr(`researchForm-${id}`)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(label)}" />
-    </label>
-  `;
-}
-
 function renderResearchEvidence(c) {
   const refs = [labelSource(c.sourceType || ""), c.sourceFile, c.sourceSheet, c.sourceId].filter(Boolean).join(" · ");
   if (c.sourcePhoto) {
@@ -701,6 +668,36 @@ function renderResearchEvidence(c) {
     `;
   }
   return `<div class="sourceReference">${escapeHtml(refs || "List reference only")}</div>`;
+}
+
+function renderResearchInfo(items, emptyText) {
+  const present = items
+    .map(([label, value]) => [label, String(value || "").trim()])
+    .filter(([, value]) => value);
+  if (!present.length) return `<span class="muted">${escapeHtml(emptyText)}</span>`;
+  return `<div class="researchInfoStack">${present.map(([label, value]) => `
+    <div class="researchInfoItem">
+      <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(value)}</span>
+    </div>
+  `).join("")}</div>`;
+}
+
+async function logout() {
+  try {
+    await fetch("/", {
+      headers: { authorization: "Basic " + btoa("logout:logout") },
+      cache: "no-store"
+    });
+  } catch {}
+  document.body.innerHTML = `
+    <main class="logoutScreen">
+      <section>
+        <h1>Logged out</h1>
+        <p>Close this tab to fully clear the browser login.</p>
+      </section>
+    </main>
+  `;
 }
 
 async function saveResearchRecord(event) {

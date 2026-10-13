@@ -13,6 +13,22 @@
   --cream: #fbf8ee;
 }
 
+.logoutScreen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--cream);
+  color: #203529;
+  padding: 24px;
+}
+.logoutScreen section {
+  max-width: 420px;
+  border: 1px solid var(--line);
+  background: #fffef8;
+  padding: 24px;
+  text-align: center;
+}
+
 * { box-sizing: border-box; }
 html {
   height: 100%;
@@ -149,6 +165,15 @@ p { margin: 0; }
 }
 .settingsButton {
   min-width: 44px;
+}
+.powerButton {
+  min-height: 44px;
+  border: 0;
+  background: #b42318;
+  color: white;
+  padding: 0 14px;
+  font-weight: 800;
+  cursor: pointer;
 }
 .photoActions {
   display: grid;
@@ -511,7 +536,7 @@ td {
   max-height: calc(100dvh - 260px);
 }
 .researchTable {
-  min-width: 1320px;
+  min-width: 1120px;
 }
 .researchTable th,
 .researchTable td {
@@ -537,6 +562,28 @@ td {
   gap: 4px;
   color: var(--muted);
   font-size: 12px;
+}
+.researchInfoStack {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+}
+.researchInfoItem {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.researchInfoItem strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+.researchInfoItem span,
+.researchNotes {
+  color: #213328;
+  font-size: 14px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .researchReason {
   color: var(--red);
