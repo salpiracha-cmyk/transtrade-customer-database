@@ -149,7 +149,7 @@ function openCustomerDialog(customer = null) {
   form.querySelector("h2").textContent = customer ? "Edit customer" : "Add customer";
   document.getElementById("saveCustomerBtn").textContent = customer ? "Save changes" : "Save";
   if (customer) {
-    for (const field of ["company", "person", "role", "country", "city", "website", "sourcePhoto", "notes"]) {
+    for (const field of ["company", "person", "role", "country", "city", "address", "website", "sourcePhoto", "notes"]) {
       if (form.elements[field]) form.elements[field].value = customer[field] || "";
     }
   }
