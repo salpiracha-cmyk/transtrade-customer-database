@@ -61,6 +61,20 @@ test('HTTP merge backs up data, rejects stale plans, preserves remarks and serve
     assert.equal(detail.photos.filter(p=>p.available).length,1);
     assert.equal(await (await fetch(base+detail.photos.find(p=>p.available).url)).text(),'fixture-image');
     assert.equal((await (await fetch(base+'/api/data-audit')).json()).uniqueEmails,2);
+    const form = new FormData();
+    form.set('file', new Blob(['Company,Person,Phone,Email,Country\nAlpha Ltd,Ann,1234567,ann@alpha.test,Kenya\n,Ben,7654321,ben@other.test,\n,Accounts,,accounts@alpha.test,\nBeta Ltd,Bea,,bea@beta.test,Uganda']), 'source-audit.csv');
+    form.set('sourceType', 'archive_buyer_list');
+    const imported = await fetch(base+'/api/import', {method:'POST', body:form});
+    assert.equal(imported.status,201,await imported.text());
+    const afterImport=JSON.parse(await fs.readFile(path.join(root,'data/database.json'),'utf8'));
+    for(const person of ['Ben','Accounts']) {
+      const row=afterImport.customers.find(c=>c.person===person && c.sourceFile==='source-audit.csv');
+      assert.ok(row);
+      assert.equal(row.company,'', 'adjacent contacts must not acquire an invented company');
+      assert.equal(row.country,'', 'adjacent contacts must not acquire an invented country');
+    }
+    assert.equal(afterImport.customers.find(c=>c.person==='Bea').company,'Beta Ltd');
+
   } finally {
     if(child&&child.exitCode===null){child.kill();await once(child,'exit');}
     await fs.rm(root,{recursive:true,force:true});

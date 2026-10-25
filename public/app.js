@@ -297,20 +297,32 @@ async function loadCustomers() {
   renderCustomers(data.customers);
 }
 
+let dashboardSearchVersion = 0;
 async function loadDashboardSearch() {
+  const version = ++dashboardSearchVersion;
   const q = document.getElementById("dashboardSearchInput").value.trim();
   const summary = document.getElementById("dashboardSearchSummary");
+  state.dashboardSearchCustomers = [];
+  renderCustomerRows([], "dashboardSearchRows", q ? "Searching…" : "Search results will appear here.");
   if (!q) {
-    state.dashboardSearchCustomers = [];
     summary.textContent = "Type to search the full database.";
-    renderCustomerRows([], "dashboardSearchRows", "Search results will appear here.");
     return;
   }
-  const params = new URLSearchParams({ q, limit: "120" });
-  const data = await api(`/api/customers?${params}`);
-  state.dashboardSearchCustomers = data.customers;
-  summary.textContent = `${data.total} matching records. Showing ${data.customers.length}.`;
-  renderCustomerRows(data.customers, "dashboardSearchRows", "No matching records.");
+  summary.textContent = "Searching…";
+  const current = () => version === dashboardSearchVersion && document.getElementById("dashboardSearchInput").value.trim() === q;
+  try {
+    const params = new URLSearchParams({ q, limit: "120" });
+    const data = await api(`/api/customers?${params}`);
+    if (!current()) return;
+    state.dashboardSearchCustomers = data.customers;
+    summary.textContent = `${data.total} matching records. Showing ${data.customers.length}.`;
+    renderCustomerRows(data.customers, "dashboardSearchRows", "No matching records.");
+  } catch (error) {
+    if (!current()) return;
+    summary.textContent = "Search failed. Please try again.";
+    renderCustomerRows([], "dashboardSearchRows", "Search failed. No results loaded.");
+    toast("Search failed. Please try again.");
+  }
 }
 
 function renderCustomers(customers) {

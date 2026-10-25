@@ -2192,76 +2192,9 @@ function mapRow(headers, row, options, filename, sheetName, sourceRow = "") {
 }
 
 function inheritWorkbookRowContext(records) {
-  let context = null;
-  return records.map((record) => {
-    if (isRowContextUnsafeSource(record)) {
-      context = null;
-      return record;
-    }
-    const originalCompany = normalizeText(record.company);
-    if (originalCompany) {
-      context = workbookContextFrom(record);
-      return record;
-    }
-    if (context && isWorkbookContinuationRecord(record, context)) {
-      for (const field of ["company", "country", "city", "address", "website"]) {
-        if (!normalizeText(record[field]) && normalizeText(context[field])) record[field] = context[field];
-      }
-      record.notes = [
-        record.notes,
-        `Company details inherited from row ${context.sourceRow || "above"} in the same workbook.`
-      ].filter(Boolean).join(" ");
-    }
-    return record;
-  });
-}
-
-function isRowContextUnsafeSource(record) {
-  const sourceType = normalizeText(record.sourceType);
-  const sourceFile = normalizeText(record.sourceFile);
-  return sourceType === "card_master"
-    || sourceFile === "TTI_Sales_Master.xlsx"
-    || sourceFile.endsWith("ALL TRANSTRADE1 CONTACTS.csv");
-}
-
-function workbookContextFrom(record) {
-  return {
-    company: normalizeText(record.company),
-    country: normalizeText(record.country),
-    city: normalizeText(record.city),
-    address: normalizeText(record.address),
-    website: normalizeText(record.website),
-    sourceFile: normalizeText(record.sourceFile),
-    sourceSheet: normalizeText(record.sourceSheet),
-    sourceRow: normalizeText(record.sourceRow)
-  };
-}
-
-function isWorkbookContinuationRecord(record, context) {
-  if (normalizeText(record.company)) return false;
-  if (normalizeText(record.sourceFile) !== context.sourceFile || normalizeText(record.sourceSheet) !== context.sourceSheet) return false;
-  if (!normalizeText(record.email) && !normalizeText(record.mobile) && !normalizeText(record.phone) && !normalizeText(record.person)) return false;
-  const rowDistance = Number(record.sourceRow || 0) - Number(context.sourceRow || 0);
-  if (Number.isFinite(rowDistance) && Number(context.sourceRow || 0) && (rowDistance < 1 || rowDistance > 8)) return false;
-  const person = normalizeText(record.person);
-  if (person && isValidEmail(person)) return false;
-  if (normalizeText(record.mobile) || normalizeText(record.phone)) return true;
-  if (person && !looksLikeSystemContact(person)) return true;
-  return emailMatchesCompanyContext(record.email, context);
-}
-
-function looksLikeSystemContact(value) {
-  return /\b(noreply|no-reply|hostmaster|postmaster|webmaster|alerts?|booking|accounts department)\b/i.test(String(value || ""));
-}
-
-function emailMatchesCompanyContext(email, context) {
-  const firstEmail = splitFirst(email).toLowerCase();
-  if (!isValidEmail(firstEmail)) return false;
-  const domain = firstEmail.split("@")[1] || "";
-  const companySlug = slug(context.company);
-  const websiteSlug = slug(String(context.website || "").replace(/^https?:\/\//i, "").split("/")[0]);
-  const domainSlug = slug(domain.replace(/\.[a-z]{2,}(\.[a-z]{2})?$/i, ""));
-  return Boolean(domainSlug && (companySlug.includes(domainSlug) || domainSlug.includes(companySlug) || (websiteSlug && websiteSlug.includes(domainSlug))));
+  // Adjacent workbook rows may represent unrelated businesses. Preserve blanks
+  // until the source itself establishes identity; never forward-fill contacts.
+  return records;
 }
 
 function isTemporarilyExcludedRecord(record, importMode) {
