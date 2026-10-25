@@ -297,9 +297,8 @@ async function loadCustomers() {
   renderCustomers(data.customers);
 }
 
-let dashboardSearchVersion = 0;
 async function loadDashboardSearch() {
-  const version = ++dashboardSearchVersion;
+  const version = state.dashboardSearchVersion = (state.dashboardSearchVersion || 0) + 1;
   const q = document.getElementById("dashboardSearchInput").value.trim();
   const summary = document.getElementById("dashboardSearchSummary");
   state.dashboardSearchCustomers = [];
@@ -309,7 +308,7 @@ async function loadDashboardSearch() {
     return;
   }
   summary.textContent = "Searching…";
-  const current = () => version === dashboardSearchVersion && document.getElementById("dashboardSearchInput").value.trim() === q;
+  const current = () => version === state.dashboardSearchVersion && document.getElementById("dashboardSearchInput").value.trim() === q;
   try {
     const params = new URLSearchParams({ q, limit: "120" });
     const data = await api(`/api/customers?${params}`);

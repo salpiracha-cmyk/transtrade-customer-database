@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 test('search ignores late results and clears results after a failed request', async () => {
   const source=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
-  const start=source.indexOf('let dashboardSearchVersion = 0;');
+  const start=source.indexOf('async function loadDashboardSearch() {');
   const end=source.indexOf('\nfunction renderCustomers',start);
   const input={value:'old'}, summary={textContent:''}, requests=[], renders=[];
   const context=vm.createContext({URLSearchParams, state:{}, document:{getElementById:id=>id==='dashboardSearchInput'?input:summary},
