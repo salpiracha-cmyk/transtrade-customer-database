@@ -964,3 +964,15 @@ dialog {
     bottom: 12px;
   }
 }
+/* Contact details are readable on phones and keep full card pages available. */
+.contactNameButton { border: 0; padding: 0; background: transparent; color: #245b92; text-align: left; font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.contactNameButton:focus-visible { outline: 2px solid #245b92; outline-offset: 4px; }
+.contactDetailDialog { width: min(1000px, 94vw); max-height: 92vh; overflow: auto; }
+.contactDetailFields { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 16px; }
+.contactDetailFields dt { font-weight: 700; }
+.contactDetailFields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.retainedCardGallery { display: grid; gap: 20px; }
+.retainedCardGallery figure { margin: 0; }
+.retainedCardGallery img { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #f4f5f6; }
+.retainedCardGallery figcaption, .missingCard { overflow-wrap: anywhere; padding: 10px 0; }
+.companyCleanupChoice { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid #ddd; }

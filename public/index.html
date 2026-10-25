@@ -69,7 +69,7 @@
         <div class="metricGrid">
           <div class="metric"><span>Active customers</span><strong id="mActive">0</strong></div>
           <div class="metric"><span>Clean records</span><strong id="mClean">0</strong></div>
-          <div class="metric"><span>Email ready</span><strong id="mEmailReady">0</strong></div>
+          <div class="metric"><span>Records with email</span><strong id="mEmailReady">0</strong><button id="dataAuditBtn" type="button" class="button secondary">Explain counts</button></div>
           <div class="metric"><span>Research needed</span><strong id="mResearch">0</strong></div>
           <div class="metric"><span>Duplicate groups</span><strong id="mDuplicates">0</strong></div>
         </div>
@@ -492,6 +492,22 @@
         </section>
       </section>
     </main>
+
+    <dialog id="contactDetailDialog" class="contactDetailDialog" aria-labelledby="contactDetailTitle">
+      <div class="dialogForm">
+        <div class="panelHeader"><h2 id="contactDetailTitle">Contact</h2><button class="button secondary" type="button" id="closeContactDetail">Close</button></div>
+        <div id="contactDetailBody" aria-live="polite"></div>
+      </div>
+    </dialog>
+
+    <dialog id="companyCleanupDialog" aria-labelledby="companyCleanupTitle">
+      <div class="dialogForm">
+        <h2 id="companyCleanupTitle">Consolidate companies</h2>
+        <p>Review companies with the same name and country. All emails, numbers, people, notes and card references are retained. Repeated records are archived and remain recoverable.</p>
+        <div id="companyCleanupBody"></div>
+        <div class="dialogActions"><button class="button secondary" type="button" id="closeCompanyCleanup">Cancel</button><button class="button" type="button" id="applyCompanyCleanup">Merge selected companies</button></div>
+      </div>
+    </dialog>
 
     <dialog id="customerDialog">
       <form method="dialog" id="customerForm" class="form dialogForm">
