@@ -82,3 +82,9 @@ test('placeholder labels do not merge unrelated people', () => {
     assert.equal(companyGroups([{id:'a',company,country:'Kenya'},{id:'b',company,country:'Kenya'}]).length,0);
   }
 });
+
+
+test('company review includes punctuation and spacing variants without crossing countries', () => {
+  const rows=[{id:'1',company:'Sun Shine General Trading L.L.C.',country:'UAE'},{id:'2',company:'Sunshine General Trading LLC',country:'UAE'},{id:'3',company:'Sunshine General Trading LLC',country:'Oman'}];
+  assert.deepEqual(companyGroups(rows).map(g=>g.ids),[['1','2']]);
+});
