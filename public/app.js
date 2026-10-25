@@ -97,6 +97,20 @@ document.getElementById("settingsForm").addEventListener("submit", saveSettings)
 document.getElementById("reloadSettingsBtn").addEventListener("click", loadSettings);
 document.getElementById("runServerExportBtn").addEventListener("click", runServerExport);
 document.addEventListener("click", handleMultiContactClick);
+document.getElementById('closeContactDetail').addEventListener('click', () => document.getElementById('contactDetailDialog').close());
+document.getElementById('closeCompanyCleanup').addEventListener('click', () => document.getElementById('companyCleanupDialog').close());
+document.getElementById('applyCompanyCleanup').addEventListener('click', applyCompanyCleanup);
+document.getElementById('dataAuditBtn').addEventListener('click', async () => {
+  const data = await api('/api/data-audit');
+  const dialog = document.getElementById('contactDetailDialog');
+  document.getElementById('contactDetailTitle').textContent = 'Record and email counts';
+  document.getElementById('contactDetailBody').innerHTML = `<p>${data.activeRecords} active records · ${data.recordsWithEmail} with an email field · ${data.uniqueEmails} unique email addresses · ${data.recordsWithoutEmail} without email.</p><p>${escapeHtml(data.note)}</p><table><thead><tr><th>Source</th><th>Records</th><th>With email</th><th>Without email</th><th>Unique addresses</th></tr></thead><tbody>${data.sources.map(s => `<tr><td>${escapeHtml(labelSource(s.sourceType))}</td><td>${s.records}</td><td>${s.withEmail}</td><td>${s.withoutEmail}</td><td>${s.uniqueEmails}</td></tr>`).join('')}</tbody></table><p>${data.companyDuplicateGroups} repeated company groups need review.</p>`;
+  dialog.showModal();
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-view-contact]');
+  if (button) openContactDetail(button.dataset.viewContact).catch(error => toast(error.message));
+});
 
 await refresh();
 await loadAiStatus();
@@ -316,7 +330,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
     rows.push(`
     <tr>
       <td><button class="deleteBox" type="button" data-row-delete="${escapeHtml(c.id)}" title="Delete">-</button></td>
-      <td><strong>${escapeHtml(c.company)}</strong><div class="muted">${escapeHtml(c.city || "")}</div></td>
+      <td><button type="button" class="contactNameButton" data-view-contact="${escapeAttr(c.id)}">${escapeHtml(c.company || c.person || 'View contact')}</button><div class="muted">${escapeHtml(c.city || "")}</div></td>
       <td>${escapeHtml(c.country)}</td>
       <td>${escapeHtml(c.person)}<div class="muted">${escapeHtml(c.role || "")}</div></td>
       <td>${renderLabeledContactChips("Mobile", c.mobile || "")}${renderLabeledContactChips("Phone", c.phone || "")}</td>
@@ -385,6 +399,14 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
 }
 
 async function loadDuplicates() {
+  const toolbar = document.getElementById('reloadDuplicatesBtn').parentElement;
+  if (!document.getElementById('reviewCompanyCleanup')) {
+    const button = document.createElement('button');
+    button.id = 'reviewCompanyCleanup'; button.className = 'button secondary';
+    button.textContent = 'Review all company duplicates';
+    button.addEventListener('click', () => reviewCompanyCleanup().catch(error => toast(error.message)));
+    toolbar.append(button);
+  }
   const type = document.getElementById("duplicateTypeFilter").value;
   const data = await api(`/api/duplicates?type=${encodeURIComponent(type)}&limit=250`);
   const el = document.getElementById("duplicateGroups");
@@ -748,6 +770,54 @@ function renderResearchInfo(items, emptyText) {
 
 async function logout() {
   window.location.href = "/logout";
+}
+
+async function openContactDetail(id) {
+  const dialog = document.getElementById('contactDetailDialog');
+  const body = document.getElementById('contactDetailBody');
+  document.getElementById('contactDetailTitle').textContent = 'Contact';
+  body.textContent = 'Loading contact and retained cards…';
+  dialog.showModal();
+  const data = await api(`/api/customers/${encodeURIComponent(id)}`);
+  if (!dialog.open) return;
+  const c = data.customer;
+  document.getElementById('contactDetailTitle').textContent = c.company || c.person || 'Contact';
+  body.innerHTML = `
+    <p>${escapeHtml([c.country, c.city, c.listCategory].filter(Boolean).join(' · '))}</p>
+    <dl class="contactDetailFields">${[['People', c.person], ['Role', c.role], ['Email', c.email], ['Mobile', c.mobile], ['Phone', c.phone], ['Website', c.website], ['Address', c.address], ['Remarks', c.notes]].filter(([,v]) => v).map(([label,value]) => `<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>
+    ${(c.contactPeople || []).length ? `<details><summary>Original people and contact details (${c.contactPeople.length})</summary>${c.contactPeople.map(p => `<p>${escapeHtml([p.person, p.role, p.email, p.mobile, p.phone, p.sourceId].filter(Boolean).join(' · '))}</p>`).join('')}</details>` : ''}
+    <h3>Retained card images</h3>
+    <div class="retainedCardGallery">${data.photos.length ? data.photos.map((p,i) => p.available
+      ? `<figure><a href="${escapeAttr(p.url)}" target="_blank" rel="noopener"><img loading="lazy" src="${escapeAttr(p.url)}" alt="Source card ${i+1} for ${escapeAttr(c.company || c.person || 'contact')}" /></a><figcaption>${escapeHtml(p.reference)} · <a href="${escapeAttr(p.url)}" target="_blank" rel="noopener">Open full image</a></figcaption></figure>`
+      : `<p class="missingCard">Image file is unavailable on this server. Retained reference: ${escapeHtml(p.reference)}</p>`).join('') : '<p class="muted">No card image is linked to this record. This may be a list import.</p>'}</div>
+    ${(c.mergeDetails || []).length ? `<details><summary>Other retained source values</summary>${c.mergeDetails.map(v => `<p>${escapeHtml(v)}</p>`).join('')}</details>` : ''}
+  `;
+  body.querySelectorAll('img').forEach(img => img.addEventListener('error', () => {
+    const message = document.createElement('p'); message.className = 'missingCard';
+    message.textContent = 'The retained image could not be loaded. Its reference is shown below.';
+    img.replaceWith(message);
+  }));
+}
+
+let companyCleanupReview = null;
+async function reviewCompanyCleanup() {
+  companyCleanupReview = await api('/api/company-cleanup');
+  document.getElementById('companyCleanupBody').innerHTML = `<p>${companyCleanupReview.groups.length} companies · ${companyCleanupReview.duplicateRecords} repeated records. Select only companies whose identity you have reviewed.</p>` + companyCleanupReview.groups.map(g => `<label class="companyCleanupChoice"><input type="checkbox" name="cleanupCompany" value="${escapeAttr(g.key)}" /> <span>${escapeHtml(g.company)} · ${escapeHtml(g.country)} · ${g.records} records</span></label>`).join('');
+  document.getElementById('companyCleanupDialog').showModal();
+}
+
+async function applyCompanyCleanup() {
+  const button = document.getElementById('applyCompanyCleanup');
+  const keys = [...document.querySelectorAll('[name="cleanupCompany"]:checked')].map(input => input.value);
+  if (!keys.length || !companyCleanupReview || button.disabled) return;
+  button.disabled = true;
+  try {
+    const result = await api('/api/company-cleanup', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({keys, fingerprint:companyCleanupReview.fingerprint}) });
+    document.getElementById('companyCleanupDialog').close();
+    toast(`${result.companies} companies consolidated; ${result.archived} repeated records archived`);
+    await refresh();
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
 }
 
 async function saveResearchRecord(event) {

@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import JSZip from "jszip";
 import { xml2js } from "xml-js";
+import { consolidateFields, photoReferences, companyGroups } from "./lib/company-records.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -118,7 +119,7 @@ async function startServer() {
   });
 
   server.listen(PORT, HOST, () => {
-    console.log(`Transtrade Customer Database running at http://${HOST}:${PORT}`);
+    console.log(`Transtrade Customer Database running at http://${HOST}:${server.address().port}`);
   });
   setInterval(() => {
     processOutreachQueue().catch((error) => console.error("Outreach queue error", error));
@@ -264,6 +265,16 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/data-audit") {
+    const db = await readDb();
+    const active = db.customers.filter(c => !c.archivedAt);
+    const sources = [...new Set(active.map(c => c.sourceType || 'unknown'))].map(sourceType => {
+      const rows = active.filter(c => (c.sourceType || 'unknown') === sourceType);
+      return { sourceType, records: rows.length, withEmail: rows.filter(c => Boolean(c.email)).length, withoutEmail: rows.filter(c => !c.email).length, uniqueEmails: new Set(rows.flatMap(c => splitEmails(c.email))).size };
+    });
+    return sendJson(res, 200, { activeRecords: active.length, recordsWithEmail: active.filter(c => Boolean(c.email)).length, uniqueEmails: new Set(active.flatMap(c => splitEmails(c.email))).size, recordsWithoutEmail: active.filter(c => !c.email).length, companyDuplicateGroups: companyGroups(active).length, sources, note: 'Email fields and unique addresses are counted separately. These counts do not verify delivery or certify unique companies.' });
+  }
+
   if (req.method === "GET" && url.pathname === "/api/settings") {
     const db = await readDb();
     sendJson(res, 200, {
@@ -305,7 +316,7 @@ async function handleApi(req, res, url) {
     if (sourceType) customers = customers.filter((c) => c.sourceType === sourceType);
     if (category) customers = customers.filter((c) => categoryMatches(c, category));
     if (query) {
-      customers = customers.filter((c) => [c.company, c.person, c.email, c.mobile, c.phone, c.country, c.city, c.role].some((v) => String(v || "").toLowerCase().includes(query)));
+      customers = customers.filter((c) => [c.company, c.person, c.email, c.mobile, c.phone, c.country, c.city, c.role, ...(c.companyAliases || []), ...(c.contactPeople || []).flatMap(p => [p.person,p.role,p.email,p.mobile,p.phone])].some((v) => String(v || "").toLowerCase().includes(query)));
     }
     const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get("limit") || 300)));
     customers = sortCustomerList(customers).map(withCustomerCategory);
@@ -332,6 +343,18 @@ async function handleApi(req, res, url) {
   }
 
   const customerMatch = url.pathname.match(/^\/api\/customers\/([^/]+)$/);
+  if (customerMatch && req.method === "GET") {
+    const db = await readDb();
+    const customer = db.customers.find(c => c.id === customerMatch[1]);
+    if (!customer) return sendJson(res, 404, { error: "Customer not found" });
+    const originals = db.customers.filter(c => (customer.mergedFrom || []).includes(c.id));
+    const photos = [...new Set([customer, ...originals].flatMap(photoReferences))].map(reference => {
+      const filename = path.basename(reference.replaceAll('\\', '/'));
+      const available = /\.(jpe?g|png|webp|heic|heif)$/i.test(filename) && fssync.existsSync(path.join(CARD_DIR, filename));
+      return { reference, available, url: available ? `/uploads/cards/${encodeURIComponent(filename)}` : null };
+    });
+    return sendJson(res, 200, { customer: withCustomerCategory(customer), photos });
+  }
   if (customerMatch && req.method === "PATCH") {
     const id = customerMatch[1];
     const body = await readJson(req);
@@ -378,6 +401,31 @@ async function handleApi(req, res, url) {
     const groups = findDuplicates(db.customers.filter((c) => !c.archivedAt), { type, limit, ignored: db.ignoredDuplicates || [] });
     sendJson(res, 200, { groups, total: groups.length, type });
     return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/company-cleanup") {
+    const db = await readDb();
+    const groups = companyGroups(db.customers);
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(db.customers)).digest('hex');
+    return sendJson(res, 200, { groups, fingerprint, duplicateRecords: groups.reduce((n, g) => n + g.records - 1, 0) });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/company-cleanup") {
+    const body = await readJson(req);
+    const db = await readDb();
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(db.customers)).digest('hex');
+    if (body.fingerprint !== fingerprint) return sendJson(res, 409, { error: "Records changed. Reload the cleanup review before merging." });
+    const groups = companyGroups(db.customers);
+    const selected = new Set(Array.isArray(body.keys) ? body.keys : []);
+    const review = groups.filter(g => selected.has(g.key));
+    if (!review.length) return sendJson(res, 400, { error: "Select reviewed companies to consolidate" });
+    const backup = `database.backup-before-company-cleanup-${Date.now()}.json`;
+    await fs.copyFile(DB_PATH, path.join(path.dirname(DB_PATH), backup));
+    if (crypto.createHash('sha256').update(JSON.stringify(db.customers)).digest('hex') !== fingerprint) return sendJson(res, 409, { error: "Records changed during backup. Reload the cleanup review." });
+    const results = review.map(group => mergeCustomers(db, group.ids, ''));
+    db.events.push(event('company_cleanup', 'admin', { backup, companies: results.length, archived: results.reduce((n,r) => n+r.mergedIds.length,0) }));
+    await writeDb(db);
+    return sendJson(res, 200, { backup, companies: results.length, archived: results.reduce((n,r) => n+r.mergedIds.length,0) });
   }
 
   if (req.method === "GET" && url.pathname === "/api/company-contacts") {
@@ -2277,8 +2325,7 @@ function companyDuplicateKey(c) {
   const company = slug(c.company);
   const country = slug(c.country);
   if (!company || !country) return "";
-  const person = personSlug(c.person);
-  return person ? `company-person:${company}:${country}:${person}` : `company-blank-person:${company}:${country}`;
+  return `company:${company}:${country}`;
 }
 
 function contactDuplicateKey(kind, value, c) {
@@ -2292,6 +2339,7 @@ function duplicateSignature(ids) {
 }
 
 function duplicateReason(key) {
+  if (key.startsWith("company:")) return "Same company and country (all people retained)";
   if (key.startsWith("email-person:")) return "Same email and person";
   if (key.startsWith("email-blank-person:")) return "Same email with missing person";
   if (key.startsWith("mobile-person:")) return "Same mobile and person";
@@ -2362,6 +2410,8 @@ function mergeCustomerFields(primary, customers) {
   for (const field of fields) {
     output[field] = bestFieldValue(field, primary, customers);
   }
+  Object.assign(output, consolidateFields(primary, customers));
+  if (!primary.manualCategory) output.manualCategory = [...customers].filter(c => c.manualCategory).sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]?.manualCategory || '';
   const notes = customers.map((c) => c.notes).filter(Boolean);
   const sources = customers.map((c) => [c.sourceType, c.sourceFile, c.sourceSheet].filter(Boolean).join(" / ")).filter(Boolean);
   output.notes = [...new Set([primary.notes, ...notes, sources.length ? `Merged sources: ${[...new Set(sources)].join("; ")}` : ""].filter(Boolean))].join(" | ");
