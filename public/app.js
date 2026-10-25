@@ -1252,10 +1252,12 @@ async function loadOutreachCampaigns() {
 }
 
 async function loadSettings() {
+  await loadAccounts();
   const form = document.getElementById("settingsForm");
   const statusBox = document.getElementById("settingsStatus");
   if (!form) return;
   try {
+    if (form.hidden) return;
     const settings = await api("/api/settings");
     for (const [key, value] of Object.entries(settings.form || {})) {
       if (form.elements[key]) form.elements[key].value = value || "";
@@ -1528,7 +1530,7 @@ function labelStatus(status) {
 }
 
 async function api(url, options) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { ...options, cache: "no-store" });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text);
@@ -1557,4 +1559,53 @@ function debounce(fn, wait) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), wait);
   };
+}
+
+async function loadAccounts() {
+  try {
+    const account = await api('/api/account');
+    document.getElementById('accountForm').elements.username.value = account.user.username;
+    document.getElementById('accountForm').hidden = !account.managed;
+    document.getElementById('accountStatus').textContent = account.managed ? 'Use at least 12 characters for a new password. Sign in again after changing your login.' : 'User management requires a server login password.';
+    const admin = account.user.role === 'admin';
+    document.getElementById('userManagement').hidden = !admin || !account.managed;
+    document.getElementById('settingsForm').hidden = !admin;
+    if (admin && account.managed) {
+      const data = await api('/api/users');
+      const list = document.getElementById('userList');
+      list.innerHTML = data.users.map(u=>`<p><strong>${escapeHtml(u.username)}</strong> · ${escapeHtml(u.role)} · ${u.disabled?'Disabled':'Active'} ${u.id===account.user.id?'(you)':`<button type="button" class="button secondary" data-edit-user="${escapeAttr(u.id)}">Edit user</button>`}</p>`).join('');
+      list.querySelectorAll('[data-edit-user]').forEach(button=>button.addEventListener('click',()=>{
+        const u=data.users.find(u=>u.id===button.dataset.editUser);
+        const form=document.getElementById('userForm'); form.reset();
+        for(const key of ['id','username','role']) form.elements[key].value=u[key];
+        form.elements.disabled.checked=u.disabled; form.elements.password.required=false;
+        form.elements.password.placeholder='Leave blank to keep current password';
+        document.getElementById('userFormTitle').textContent='Edit user';
+      }));
+    }
+  } catch(error) { document.getElementById('accountStatus').textContent=error.message; }
+}
+document.getElementById('cancelUserEdit').addEventListener('click', resetUserForm);
+function resetUserForm() {
+  const form=document.getElementById('userForm'); form.reset(); form.elements.id.value='';
+  form.elements.password.required=true; form.elements.password.placeholder='At least 12 characters';
+  document.getElementById('userFormTitle').textContent='Add user';
+}
+for (const [formId, statusId, url] of [['accountForm','accountStatus','/api/account'],['userForm','userStatus','/api/users']]) {
+  document.getElementById(formId).addEventListener('submit',async event=>{
+    event.preventDefault(); const form=event.currentTarget;
+    const status=document.getElementById(statusId); const button=form.querySelector('button[type="submit"]');
+    const body=Object.fromEntries(new FormData(form));
+    if(body.password!==body.confirmPassword) { status.textContent='Passwords do not match'; return; }
+    delete body.confirmPassword;
+    if(formId==='userForm') body.disabled=form.elements.disabled.checked;
+    button.disabled=true;
+    try {
+      await api(url,{method:formId==='accountForm'||body.id?'PATCH':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      form.reset();
+      if(formId==='accountForm') status.textContent='Login updated. Reload this page and sign in with your updated login ID and password.';
+      else { resetUserForm(); await loadAccounts(); status.textContent='User saved'; }
+    } catch(error) { status.textContent=error.message; }
+    finally { button.disabled=false; }
+  });
 }

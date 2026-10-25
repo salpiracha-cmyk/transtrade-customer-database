@@ -66,3 +66,19 @@ test('HTTP merge backs up data, rejects stale plans, preserves remarks and serve
     await fs.rm(root,{recursive:true,force:true});
   }
 });
+
+test('subsequent merges retain nested cards without reviving removed contact routes', () => {
+  const a={id:'a', company:'Acme', email:'main@acme.test', contactPeople:[{person:'Older contact',email:'old@acme.test',phone:'12345',sourcePhoto:'legacy.png'}]};
+  const b={id:'b', company:'Acme', email:'second@acme.test'};
+  const result=consolidateFields(a,[a,b]);
+  assert.equal(result.email,'main@acme.test; second@acme.test');
+  assert.equal(result.phone,'');
+  assert.ok(result.sourcePhotos.includes('legacy.png'));
+});
+
+
+test('placeholder labels do not merge unrelated people', () => {
+  for (const company of ['Unknown','Independent contact','Handwritten note','General Trading LLC','S.R.L.','Kenya']) {
+    assert.equal(companyGroups([{id:'a',company,country:'Kenya'},{id:'b',company,country:'Kenya'}]).length,0);
+  }
+});

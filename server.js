@@ -8,7 +8,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import JSZip from "jszip";
 import { xml2js } from "xml-js";
-import { consolidateFields, photoReferences, companyGroups } from "./lib/company-records.js";
+import { UserStore } from "./lib/users.js";
+import { consolidateFields, photoReferences, companyGroups, companyIdentity } from "./lib/company-records.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,7 +38,9 @@ const OUTREACH_SEND_GAP_MS = Number(process.env.OUTREACH_SEND_GAP_MS || 300000);
 const APP_USER = process.env.APP_USER || "tti";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const execFileAsync = promisify(execFile);
+const users = new UserStore(path.join(__dirname, "data", "users.json"));
 let outreachProcessing = false;
+let mutationQueue = Promise.resolve();
 let dbCache = null;
 let dbCacheMtimeMs = 0;
 
@@ -91,6 +94,7 @@ startServer().catch((error) => {
 async function startServer() {
   await ensureDirs();
   await ensureDb();
+  await users.init(APP_USER, APP_PASSWORD);
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -103,12 +107,21 @@ async function startServer() {
         sendLogoutPage(res);
         return;
       }
-      if (APP_PASSWORD && !isAuthorized(req)) {
+      req.user = users.enabled ? await users.authenticate(req.headers.authorization) : {id:"local", username:"local", role:"admin"};
+      if (!req.user) {
         requestAuth(res);
         return;
       }
       if (url.pathname.startsWith("/api/")) {
-        await handleApi(req, res, url);
+        const origin = req.headers.origin;
+        if (!['GET','HEAD','OPTIONS'].includes(req.method) && ((origin && new URL(origin).host !== req.headers.host) || req.headers['sec-fetch-site'] === 'cross-site')) return sendJson(res,403,{error:'Cross-site changes are not allowed'});
+        if ((url.pathname === '/api/settings' || url.pathname === '/api/server-export' || url.pathname.startsWith('/api/admin/')) && req.user.role !== 'admin') return sendJson(res,403,{error:'Administrator access required'});
+        if (['GET','HEAD','OPTIONS'].includes(req.method)) await handleApi(req, res, url);
+        else {
+          const operation = mutationQueue.then(() => handleApi(req, res, url));
+          mutationQueue = operation.catch(() => {});
+          await operation;
+        }
         return;
       }
       await serveStatic(req, res, url);
@@ -129,17 +142,6 @@ async function startServer() {
 
 function isPublicUnsubscribeRoute(url) {
   return url.pathname === "/unsubscribe" || url.pathname === "/api/unsubscribe";
-}
-
-function isAuthorized(req) {
-  const header = req.headers.authorization || "";
-  if (!header.startsWith("Basic ")) return false;
-  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-  const separator = decoded.indexOf(":");
-  if (separator === -1) return false;
-  const user = decoded.slice(0, separator);
-  const password = decoded.slice(separator + 1);
-  return user === APP_USER && password === APP_PASSWORD;
 }
 
 function requestAuth(res) {
@@ -259,6 +261,23 @@ function normalizeProviderOrder(value) {
 }
 
 async function handleApi(req, res, url) {
+  if (url.pathname === '/api/account' && req.method === 'GET') return sendJson(res,200,{user:req.user, managed:users.enabled});
+  if (url.pathname === '/api/users' || url.pathname === '/api/account') {
+    if (!users.enabled) return sendJson(res,400,{error:'Configure APP_PASSWORD on the server before managing users'});
+    if (url.pathname === '/api/users' && req.user.role !== 'admin') return sendJson(res,403,{error:'Administrator access required'});
+    if (url.pathname === '/api/users' && req.method === 'GET') return sendJson(res,200,{users:users.list()});
+    if ((url.pathname === '/api/users' && ['POST','PATCH'].includes(req.method)) || (url.pathname === '/api/account' && req.method === 'PATCH')) {
+      const body = await readJson(req);
+      try {
+        const id = url.pathname === '/api/account' ? req.user.id : (req.method === 'POST' ? null : body.id);
+        if (req.method === 'PATCH' && !id) return sendJson(res,400,{error:'Select a user'});
+        const user = await users.update(req.user,id,body);
+        return sendJson(res,200,{user});
+      } catch (error) { return sendJson(res,400,{error:error.message}); }
+    }
+    return sendJson(res,405,{error:'Method not allowed'});
+  }
+
   if (req.method === "GET" && url.pathname === "/api/summary") {
     const db = await readDb();
     sendJson(res, 200, buildSummary(db));
@@ -421,7 +440,7 @@ async function handleApi(req, res, url) {
     if (!review.length) return sendJson(res, 400, { error: "Select reviewed companies to consolidate" });
     const backup = `database.backup-before-company-cleanup-${Date.now()}.json`;
     await fs.copyFile(DB_PATH, path.join(path.dirname(DB_PATH), backup));
-    if (crypto.createHash('sha256').update(JSON.stringify(db.customers)).digest('hex') !== fingerprint) return sendJson(res, 409, { error: "Records changed during backup. Reload the cleanup review." });
+    if (crypto.createHash('sha256').update(JSON.stringify(JSON.parse(await fs.readFile(DB_PATH, 'utf8')).customers)).digest('hex') !== fingerprint) return sendJson(res, 409, { error: "Records changed during backup. Reload the cleanup review." });
     const results = review.map(group => mergeCustomers(db, group.ids, ''));
     db.events.push(event('company_cleanup', 'admin', { backup, companies: results.length, archived: results.reduce((n,r) => n+r.mergedIds.length,0) }));
     await writeDb(db);
@@ -652,6 +671,9 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/duplicates/merge") {
     const body = await readJson(req);
     const db = await readDb();
+    const activeIds = new Set(db.customers.filter(c=>!c.archivedAt).map(c=>c.id));
+    if (!Array.isArray(body.ids) || new Set(body.ids.filter(id=>activeIds.has(id))).size < 2) return sendJson(res,400,{error:'Need at least two active customer ids to merge'});
+    await fs.copyFile(DB_PATH, path.join(path.dirname(DB_PATH), `database.backup-before-merge-${Date.now()}.json`));
     const result = mergeCustomers(db, body.ids || [], body.primaryId || "");
     if (!result) return sendJson(res, 400, { error: "Need at least two active customer ids to merge" });
     db.events.push(event("customers_merged", result.primary.id, {
@@ -2003,7 +2025,7 @@ function now() {
 }
 
 function sendJson(res, status, payload) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store, private" });
   res.end(JSON.stringify(payload));
 }
 
@@ -2322,6 +2344,7 @@ function findCompanyContactGroups(customers, options = {}) {
 }
 
 function companyDuplicateKey(c) {
+  if (!companyIdentity(c)) return "";
   const company = slug(c.company);
   const country = slug(c.country);
   if (!company || !country) return "";

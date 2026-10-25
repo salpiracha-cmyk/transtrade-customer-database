@@ -445,6 +445,33 @@
             </div>
             <button id="reloadSettingsBtn" class="button secondary" type="button">Reload</button>
           </div>
+          <section class="settingsBlock" aria-labelledby="accountTitle">
+            <h2 id="accountTitle">My login ID and password</h2>
+            <form id="accountForm" class="form">
+              <label>Login ID<input name="username" autocomplete="username" required /></label>
+              <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required /></label>
+              <label>New password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" placeholder="Leave blank to keep current password" /></label>
+              <label>Confirm new password<input name="confirmPassword" type="password" autocomplete="new-password" /></label>
+              <button class="button" type="submit">Update my login</button>
+            </form>
+            <p id="accountStatus" role="status"></p>
+          </section>
+          <section id="userManagement" class="settingsBlock" hidden>
+            <h2>Users</h2>
+            <p>Administrators manage users and settings. Users work with customer records and cards.</p>
+            <div id="userList"></div>
+            <h3 id="userFormTitle">Add user</h3>
+            <form id="userForm" class="form">
+              <input name="id" type="hidden" />
+              <label>New user login ID<input name="username" autocomplete="off" required /></label>
+              <label>User password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /></label>
+              <label>Confirm user password<input name="confirmPassword" type="password" autocomplete="new-password" /></label>
+              <label>Access<select name="role"><option value="user">User</option><option value="admin">Administrator</option></select></label>
+              <label><input name="disabled" type="checkbox" /> Disable account</label>
+              <div><button class="button" type="submit">Save user</button> <button id="cancelUserEdit" type="button" class="button secondary">Clear</button></div>
+            </form>
+            <p id="userStatus" role="status"></p>
+          </section>
           <form id="settingsForm" class="form settingsForm">
             <section class="settingsBlock">
               <h2>Card Reader</h2>
@@ -603,6 +630,6 @@
       </div>
     </div>
     <div id="toast"></div>
-    <script src="/app.js" type="module"></script>
+    <script src="/app.js?v=20261025-users-audit-2" type="module"></script>
   </body>
 </html>

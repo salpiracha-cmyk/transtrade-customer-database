@@ -65,3 +65,9 @@ The live database and card uploads are intentionally excluded from GitHub:
 Move those to the server separately during deployment.
 
 OCR, local AI enrichment, and outreach account status are available. Bulk outreach sending should remain disabled until unsubscribe pages, bounce/complaint webhooks, and suppression checks are live.
+
+### Users and passwords
+
+Settings includes My login ID and password, and an administrator-only Users panel for adding users, resetting other users' passwords and disabling accounts. New passwords require 12–128 characters. Changing your own credentials requires your current password; sign in again afterwards. The existing APP_USER / APP_PASSWORD login is migrated once into `data/users.json` using salted scrypt hashes. After migration the environment password is not a fallback. Preserve this private file with other live data during deployments and backups; never commit it or replace it with a preview copy. Database restores do not replace user accounts. Ordinary users cannot read API-key settings, manage users, restore databases or run server exports.
+
+The application retains HTTP Basic authentication for compatibility with the office export agent. Update the office agent's stored login after changing the account it uses. Deploy the matching HTML and JavaScript together; the script version query prevents older cached interfaces from hiding new controls.
