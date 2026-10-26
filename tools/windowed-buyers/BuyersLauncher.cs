@@ -32,8 +32,8 @@ class BuyersLauncher {
    string python=Probe("py.exe");
    if(String.IsNullOrEmpty(python)) python=Probe("python.exe");
    if(String.IsNullOrEmpty(python)||!File.Exists(python)) throw new Exception("Python 3.12 or newer was not found. Install Python from python.org with the Python launcher and Tcl/Tk options, then reopen this app.");
-   if(args.Length>0 && args[0]=="--self-test") return 0;
-   var info=new ProcessStartInfo(python,"\""+script+"\"") { UseShellExecute=false, CreateNoWindow=true, WorkingDirectory=folder, RedirectStandardOutput=true, RedirectStandardError=true };
+   bool testing=args.Length>0 && args[0]=="--self-test";
+   var info=new ProcessStartInfo(python,"\""+script+"\""+(testing?" --smoke-test":"")) { UseShellExecute=false, CreateNoWindow=true, WorkingDirectory=folder, RedirectStandardOutput=true, RedirectStandardError=true };
    using(var p=new Process()) {
     p.StartInfo=info; string errors="";
     p.ErrorDataReceived+=(s,e)=>{ if(e.Data!=null) errors+=e.Data+Environment.NewLine; };
