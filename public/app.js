@@ -1694,7 +1694,7 @@ let auditEntryPreview=null;
 document.getElementById('auditEntryJson').addEventListener('input',()=>{auditEntryPreview=null;document.getElementById('applyAuditEntries').disabled=true;});
 document.getElementById('previewAuditEntries').addEventListener('click',async()=>{
  const out=document.getElementById('auditEntryStatus');auditEntryPreview=null;document.getElementById('applyAuditEntries').disabled=true;
- try{const entries=JSON.parse(document.getElementById('auditEntryJson').value);const p=await api('/api/admin/audit-entries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({entries})});auditEntryPreview={entries,fingerprint:p.fingerprint};const counts={};for(const d of p.decisions)counts[d.status]=(counts[d.status]||0)+1;out.textContent=JSON.stringify(counts,null,2);document.getElementById('applyAuditEntries').disabled=!p.ready;}catch(e){out.textContent=e.message;}
+ try{const entries=JSON.parse(document.getElementById('auditEntryJson').value);const p=await api('/api/admin/audit-entries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({entries})});auditEntryPreview={entries,fingerprint:p.fingerprint};const counts={};for(const d of p.decisions)counts[d.status]=(counts[d.status]||0)+1;out.textContent=JSON.stringify({counts,exceptions:p.decisions.filter(d=>!['ready','already-applied'].includes(d.status))},null,2);document.getElementById('applyAuditEntries').disabled=!p.ready;}catch(e){out.textContent=e.message;}
 });
 document.getElementById('applyAuditEntries').addEventListener('click',async()=>{
  if(!auditEntryPreview)return;document.getElementById('applyAuditEntries').disabled=true;
