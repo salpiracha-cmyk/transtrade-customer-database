@@ -266,6 +266,14 @@ async function handleApi(req, res, url) {
     if (!users.enabled) return sendJson(res,400,{error:'Configure APP_PASSWORD on the server before managing users'});
     if (url.pathname === '/api/users' && req.user.role !== 'admin') return sendJson(res,403,{error:'Administrator access required'});
     if (url.pathname === '/api/users' && req.method === 'GET') return sendJson(res,200,{users:users.list()});
+    if (url.pathname === '/api/users' && req.method === 'DELETE') {
+      const body = await readJson(req);
+      try {
+        if (!body.id) return sendJson(res,400,{error:'Select a user'});
+        await users.delete(req.user,body.id);
+        return sendJson(res,200,{deleted:true});
+      } catch (error) { return sendJson(res,400,{error:error.message}); }
+    }
     if ((url.pathname === '/api/users' && ['POST','PATCH'].includes(req.method)) || (url.pathname === '/api/account' && req.method === 'PATCH')) {
       const body = await readJson(req);
       try {
@@ -2606,3 +2614,4 @@ function colName(index) {
 function escapeXml(value) {
   return String(value ?? "").replace(/[<>&'"]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[ch]));
 }
+

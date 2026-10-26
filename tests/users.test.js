@@ -54,3 +54,20 @@ test('HTTP account permissions and cross-site protection',async()=>{
   assert.equal((await call('/api/customers',basic('staff','replacement-test-password'))).status,200);
  }finally{if(child&&child.exitCode===null){child.kill();await once(child,'exit');}await fs.rm(dir,{recursive:true,force:true});}
 });
+
+
+test('permanent user deletion revokes access and persists',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'tti-delete-users-'));
+ try {
+  const file=path.join(dir,'users.json');const s=new UserStore(file);
+  await s.init('owner','owner-test-password');
+  const owner=await s.authenticate(basic('owner','owner-test-password'));
+  const staff=await s.update(owner,null,{username:'staff',password:'staff-test-password'});
+  await assert.rejects(s.delete(staff,owner.id),/Administrator/);
+  await assert.rejects(s.delete(owner,owner.id),/own signed-in/);
+  await s.delete(owner,staff.id);
+  assert.equal(await s.authenticate(basic('staff','staff-test-password')),null);
+  const restart=new UserStore(file);await restart.init('unused','unused-password');
+  assert.equal(restart.list().some(u=>u.id===staff.id),false);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});

@@ -445,6 +445,11 @@
             </div>
             <button id="reloadSettingsBtn" class="button secondary" type="button">Reload</button>
           </div>
+          <div role="tablist" aria-label="Settings sections">
+            <button type="button" class="button" role="tab" aria-selected="true" data-settings-tab="users">Users and password</button>
+            <button type="button" class="button secondary" role="tab" aria-selected="false" data-settings-tab="general">App settings</button>
+          </div>
+          <div id="settingsUsersPanel" role="tabpanel">
           <section class="settingsBlock" aria-labelledby="accountTitle">
             <h2 id="accountTitle">My login ID and password</h2>
             <form id="accountForm" class="form">
@@ -472,6 +477,8 @@
             </form>
             <p id="userStatus" role="status"></p>
           </section>
+          </div>
+          <div id="settingsGeneralPanel" role="tabpanel" hidden>
           <form id="settingsForm" class="form settingsForm">
             <section class="settingsBlock">
               <h2>Card Reader</h2>
@@ -516,6 +523,7 @@
               <button class="button" type="submit">Save settings</button>
             </div>
           </form>
+          </div>
         </section>
       </section>
     </main>
@@ -631,6 +639,7 @@
       </div>
     </div>
     <div id="toast"></div>
-    <script src="/app.js?v=20261025-source-audit-5" type="module"></script>
+    <script src="/app.js?v=20261026-users-tab" type="module"></script>
   </body>
 </html>
+

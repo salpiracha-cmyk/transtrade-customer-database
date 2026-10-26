@@ -1584,7 +1584,14 @@ async function loadAccounts() {
     if (admin && account.managed) {
       const data = await api('/api/users');
       const list = document.getElementById('userList');
-      list.innerHTML = data.users.map(u=>`<p><strong>${escapeHtml(u.username)}</strong> · ${escapeHtml(u.role)} · ${u.disabled?'Disabled':'Active'} ${u.id===account.user.id?'(you)':`<button type="button" class="button secondary" data-edit-user="${escapeAttr(u.id)}">Edit user</button>`}</p>`).join('');
+      list.innerHTML = data.users.map(u=>`<p><strong>${escapeHtml(u.username)}</strong> · ${escapeHtml(u.role)} · ${u.disabled?'Disabled':'Active'} ${u.id===account.user.id?'(you)':`<button type="button" class="button secondary" data-edit-user="${escapeAttr(u.id)}">Edit user</button> <button type="button" class="button secondary" data-delete-user="${escapeAttr(u.id)}">Delete permanently</button>`}</p>`).join('');
+      list.querySelectorAll('[data-delete-user]').forEach(button=>button.addEventListener('click',async()=>{
+        const u=data.users.find(u=>u.id===button.dataset.deleteUser);
+        if (!confirm('Permanently delete user '+u.username+'? Their access will end immediately.')) return;
+        button.disabled=true;
+        try { await api('/api/users',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({id:u.id})}); resetUserForm(); await loadAccounts(); document.getElementById('userStatus').textContent='User permanently deleted'; }
+        catch(error) { document.getElementById('userStatus').textContent=error.message; button.disabled=false; }
+      }));
       list.querySelectorAll('[data-edit-user]').forEach(button=>button.addEventListener('click',()=>{
         const u=data.users.find(u=>u.id===button.dataset.editUser);
         const form=document.getElementById('userForm'); form.reset();
@@ -1618,5 +1625,15 @@ for (const [formId, statusId, url] of [['accountForm','accountStatus','/api/acco
       else { resetUserForm(); await loadAccounts(); status.textContent='User saved'; }
     } catch(error) { status.textContent=error.message; }
     finally { button.disabled=false; }
+  });
+}
+
+
+for(const button of document.querySelectorAll('[data-settings-tab]')) {
+  button.addEventListener('click',()=>{
+    const users=button.dataset.settingsTab==='users';
+    document.getElementById('settingsUsersPanel').hidden=!users;
+    document.getElementById('settingsGeneralPanel').hidden=users;
+    for(const tab of document.querySelectorAll('[data-settings-tab]')) tab.setAttribute('aria-selected',String(tab===button));
   });
 }
