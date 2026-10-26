@@ -65,6 +65,29 @@ class RecoveryTests(unittest.TestCase):
   with patch.object(m,'Client',BrokenClient):
    with self.assertRaises(RuntimeError):m.run({'root':str(out)},lambda _:None)
   self.assertEqual(old.read_bytes(),b'original');self.assertEqual(m.read_json(m.APP/'status.json')['state'],'FAILED')
+ def archive(self,links):
+  source=self.source();out=io.BytesIO()
+  with tarfile.open(fileobj=out,mode='w:gz') as t:
+   for p in source.rglob('*'):
+    if p.is_file():t.add(p,arcname=p.relative_to(source).as_posix(),recursive=False)
+   for name,kind,target in links:
+    info=tarfile.TarInfo(name);info.type=kind;info.linkname=target;t.addfile(info)
+  return out.getvalue()
+ def test_internal_links_become_plain_files(self):
+  data=self.archive([('copy.js',tarfile.SYMTYPE,'server.js'),('data/copy.js',tarfile.SYMTYPE,'../server.js'),('hard.js',tarfile.LNKTYPE,'server.js')])
+  out=self.root/'unpacked';m.unpack_recovery(data,out)
+  for name in ['copy.js','data/copy.js','hard.js']:
+   self.assertEqual((out/name).read_text(),'//code');self.assertFalse((out/name).is_symlink())
+  m.verify_recovery(out)
+ def test_external_links_still_rejected_with_name(self):
+  data=self.archive([('bad-link',tarfile.SYMTYPE,'../../outside')])
+  with self.assertRaisesRegex(ValueError,'bad-link'):m.unpack_recovery(data,self.root/'bad-link-output')
+ def test_absolute_link_still_rejected(self):
+  data=self.archive([('bad-link',tarfile.SYMTYPE,'/etc/passwd')])
+  with self.assertRaisesRegex(ValueError,'bad-link'):m.unpack_recovery(data,self.root/'bad-absolute')
+ def test_circular_links_rejected(self):
+  data=self.archive([('a',tarfile.SYMTYPE,'b'),('b',tarfile.SYMTYPE,'a')])
+  with self.assertRaisesRegex(ValueError,'Circular'):m.unpack_recovery(data,self.root/'bad-cycle')
  @unittest.skipUnless(os.name=='nt','Windows DPAPI')
  def test_windows_credentials_roundtrip(self):self.assertEqual(m.protect(__import__('base64').b64decode(m.protect('test-only-not-a-real-password')),True),'test-only-not-a-real-password')
 
