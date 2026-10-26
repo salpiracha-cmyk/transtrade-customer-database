@@ -1,3 +1,4 @@
+import { createRecoveryJobs } from './lib/recovery-jobs.js';
 import { stageRecovery } from './lib/recovery-export.js';
 import {previewEntries,applyEntries,fingerprint as entryFingerprint} from './lib/audit-entries.js';
 import { isReview, previewReviewPlan, reviewFingerprint } from "./lib/review.js";
@@ -263,7 +264,36 @@ function normalizeProviderOrder(value) {
   return [...new Set(normalized.length ? normalized : ["gemini", "openai", "claude", "ollama", "ocr"])];
 }
 
+const recoveryJobs=createRecoveryJobs(async(temp,progress,deadline)=>{
+      const archive=path.join(temp,'buyers-recovery.tar.gz');
+      let savedEnv=fssync.existsSync(path.join(__dirname,'.env'))?await fs.readFile(path.join(__dirname,'.env'),'utf8'):'';
+      const recoveryKeys=['HOST','PORT','APP_USER','APP_PASSWORD','OLLAMA_URL','OLLAMA_VISION_MODEL','OPENAI_API_KEY','OPENAI_MODEL','GEMINI_API_KEY','GEMINI_MODEL','CLAUDE_API_KEY','CLAUDE_MODEL','RESEND_API_KEY','RESEND_FROM_NAME','RESEND_FROM_EMAIL','RESEND_DOMAIN','OUTREACH_SEND_ENABLED','OUTREACH_SEND_GAP_MS','SERVER_EXPORT_DIR'];
+      for(const key of recoveryKeys){if(process.env[key]!==undefined){const value=process.env[key];if(/[\r\n]/.test(value))throw Error('Multiline runtime setting cannot be exported: '+key);savedEnv=key+'='+value+'\n'+savedEnv;}}
+      const snapshot=path.join(temp,'snapshot');
+      await stageRecovery(__dirname,snapshot,progress);
+      await fs.writeFile(path.join(snapshot,'.env'),savedEnv+'\n',{mode:0o600});
+      progress('Compressing full software, database, users and cards');
+      await execFileAsync('tar',['-czf',archive,'-C',snapshot,'.'],{timeout:Math.max(1,deadline-Date.now()),maxBuffer:1024*1024});
+      return archive;
+});
+
 async function handleApi(req, res, url) {
+
+  if(url.pathname==='/api/admin/recovery-jobs' || url.pathname.startsWith('/api/admin/recovery-jobs/')){
+    if(req.user.role!=='admin')return sendJson(res,403,{error:'Administrator access required'});
+    if(req.method==='POST' && url.pathname==='/api/admin/recovery-jobs')return sendJson(res,202,recoveryJobs.start());
+    const match=url.pathname.match(/^\/api\/admin\/recovery-jobs\/([a-f0-9-]+)(\/download)?$/);
+    if(req.method!=='GET' || !match)return sendJson(res,405,{error:'Unsupported recovery job request'});
+    const status=recoveryJobs.status(match[1]);
+    if(!status)return sendJson(res,404,{error:'Recovery job expired or the website restarted. Start a new backup.'});
+    if(!match[2])return sendJson(res,200,status);
+    const archive=recoveryJobs.file(match[1]);
+    if(!archive)return sendJson(res,409,{error:'Recovery archive is not ready',state:status.state});
+    res.writeHead(200,{'x-tti-recovery-format':'portable-v3','content-type':'application/gzip','content-length':status.bytes,'content-disposition':'attachment; filename="TTI_Buyers_Full_Recovery.tar.gz"','cache-control':'no-store'});
+    const stream=fssync.createReadStream(archive);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
+    return;
+  }
+
   if(req.method==='GET' && url.pathname==='/api/admin/recovery.tar.gz'){
     if(req.user.role!=='admin') return sendJson(res,403,{error:'Administrator access required'});
     const os=await import('node:os');
