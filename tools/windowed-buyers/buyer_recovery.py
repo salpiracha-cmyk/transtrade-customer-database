@@ -91,13 +91,74 @@ def recovery_manifest(root):
     return {'format':'TTI-BUYERS-RECOVERY-1','created':dt.datetime.now().isoformat(),'files':files,'customers':len(db['customers'])}
 
 def unpack_recovery(data,destination):
+    # Convert valid in-archive links to ordinary files/directories. Never create
+    # filesystem links or follow a link outside the validated archive namespace.
+    import posixpath
     destination=Path(destination); destination.mkdir(parents=True,exist_ok=True)
+    if any(destination.iterdir()):raise ValueError('Recovery staging folder must be empty.')
+    def normalize(name, context):
+        if not name or name.startswith('/') or '\\' in name or ':' in name:
+            raise ValueError('Unsafe recovery path: '+context)
+        result=posixpath.normpath(name)
+        if result=='..' or result.startswith('../'):
+            raise ValueError('Recovery path escapes the backup folder: '+context)
+        return result
     with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') as t:
-        members=t.getmembers()
-        for m in members:
-            target=(destination/m.name).resolve()
-            if not target.is_relative_to(destination.resolve()) or not (m.isfile() or m.isdir()): raise ValueError('Unsafe recovery archive member.')
-        t.extractall(destination,members=members,filter='data')
+        entries={}
+        for m in t.getmembers():
+            name=normalize(m.name,m.name)
+            if not (m.isfile() or m.isdir() or m.issym() or m.islnk()):
+                raise ValueError('Unsupported recovery entry: '+m.name+' (type '+repr(m.type)+')')
+            if name=='.' and not m.isdir():raise ValueError('Invalid recovery root entry: '+m.name)
+            entries[name]=m
+        def resolve(name,seen=None):
+            seen=set() if seen is None else seen
+            if name in seen:raise ValueError('Circular recovery link: '+name)
+            seen.add(name)
+            m=entries.get(name)
+            if m is None:raise ValueError('Recovery link target is missing: '+name)
+            if m.issym() or m.islnk():
+                if m.linkname.startswith('/') or '\\' in m.linkname or ':' in m.linkname:raise ValueError('Unsafe recovery link: '+m.name+' -> '+m.linkname)
+                link=m.linkname
+                # Relative symbolic links are relative to the link's parent.
+                # Re-normalize the joined path; hard links use archive-root paths.
+                if m.issym():
+                    link=normalize(posixpath.join(posixpath.dirname(name),m.linkname),m.name+' -> '+m.linkname)
+                else:link=normalize(link,m.name+' -> '+m.linkname)
+                return resolve(link,seen)
+            return name,m
+        # Validate link targets and parent paths before writing any contents.
+        for name,m in entries.items():
+            parent=posixpath.dirname(name)
+            while parent and parent!='.':
+                if parent in entries and not entries[parent].isdir():
+                    raise ValueError('Recovery entry has a non-directory parent: '+name)
+                parent=posixpath.dirname(parent)
+            if m.issym() or m.islnk():resolve(name)
+        def copy_entry(name,m,target,seen=None):
+            seen=set() if seen is None else seen
+            if name in seen:raise ValueError('Circular recovery directory link: '+name)
+            seen=seen|{name}
+            if m.issym() or m.islnk():
+                original,resolved=resolve(name)
+                if m.islnk() and not resolved.isfile():raise ValueError('Invalid recovery hard link: '+name)
+                return copy_entry(original,resolved,target,seen)
+            if m.isdir():
+                target.mkdir(parents=True,exist_ok=True)
+                for child,info in entries.items():
+                    if child!='.' and posixpath.dirname(child)==('' if name=='.' else name):
+                        copy_entry(child,info,target/posixpath.basename(child),seen)
+            elif m.isfile():
+                target.parent.mkdir(parents=True,exist_ok=True)
+                source=t.extractfile(m)
+                if source is None:raise ValueError('Unreadable recovery file: '+name)
+                with source, target.open('wb') as out:shutil.copyfileobj(source,out)
+        # Explicit top-level items also cover archives without a '.' entry.
+        for name,m in entries.items():
+            if name!='.' and not posixpath.dirname(name):copy_entry(name,m,destination/name)
+        # Some tar producers omit directory entries. Copy such ordinary files too.
+        for name,m in entries.items():
+            if name!='.' and not (destination/name).exists():copy_entry(name,m,destination/name)
     manifest=recovery_manifest(destination); write_json(destination/'TTI_RECOVERY_MANIFEST.json',manifest)
     return manifest
 
