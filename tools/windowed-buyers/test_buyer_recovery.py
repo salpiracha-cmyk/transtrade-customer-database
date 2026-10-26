@@ -47,7 +47,7 @@ class RecoveryTests(unittest.TestCase):
   self.assertTrue(raw.startswith((b'\xff\xfe',b'\xfe\xff')))
   self.assertIn("encoding='utf-16'",xml)
   tree=ET.fromstring(raw);ns={'t':'http://schemas.microsoft.com/windows/2004/02/mit/task'}
-  self.assertEqual(tree.find('.//t:Command',ns).text,str(interpreter.with_name('pythonw.exe')))
+  self.assertEqual(tree.find('.//t:Command',ns).text,str(interpreter.resolve().with_name('pythonw.exe')))
   self.assertEqual(tree.find('.//t:Arguments',ns).text,m.subprocess.list2cmdline([str(m.APP/'buyer_recovery.py'),'--scheduled']))
   self.assertTrue((m.APP/'buyer_recovery.py').is_file());self.assertEqual(m.read_json(m.APP/'config.json'),{'keep':'settings'})
   self.assertEqual(call.call_args_list[0].args[0][1],'/Create');self.assertEqual(call.call_args_list[1].args[0][1],'/Query')
