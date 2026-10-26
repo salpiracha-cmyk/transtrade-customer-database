@@ -50,7 +50,7 @@ class Client:
         if urllib.parse.urlparse(self.base).scheme!='https': raise ValueError('Website URL must use HTTPS.')
         pwd=protect(base64.b64decode(c['secret']),True)
         self.auth='Basic '+base64.b64encode((c['user']+':'+pwd).encode()).decode()
-    def get(self,route):
+    def get(self,route,method="GET",destination=None,deadline=None,emit=lambda _:None):
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self,*args,**kwargs): return None
         def origin(value):
@@ -60,20 +60,33 @@ class Client:
             return (parsed.hostname.lower(),parsed.port or 443)
         trusted=origin(self.base)
         for attempt in range(3):
-            current=self.base+route
+            current=self.base+route;request_method=method
             try:
                 for hop in range(6):
                     if origin(current)!=trusted:
                         host=urllib.parse.urlsplit(current).hostname
                         raise RuntimeError('Website redirected the backup to another host ('+str(host)+'). Login was not sent. Please share this error so the hosting redirect can be checked.')
-                    req=urllib.request.Request(current,headers={'Authorization':self.auth,'User-Agent':'TTI-Buyers-Weekly/1.3'})
+                    req=urllib.request.Request(current,data=b'' if request_method=='POST' else None,method=request_method,headers={'Authorization':self.auth,'User-Agent':'TTI-Buyers-Weekly/1.4'})
                     try:
-                        with urllib.request.build_opener(NoRedirect).open(req,timeout=180) as r:return r.read()
+                        with urllib.request.build_opener(NoRedirect).open(req,timeout=180) as r:
+                            if destination is None:return r.read()
+                            total=int(r.headers.get('Content-Length','0'));received=0;last=0
+                            with Path(destination).open('wb') as out:
+                                while True:
+                                    if deadline is not None and time.monotonic()>deadline:raise RuntimeError('Full recovery exceeded its two-hour limit. Previous backups are kept.')
+                                    chunk=r.read(1024*1024)
+                                    if not chunk:break
+                                    out.write(chunk);received+=len(chunk)
+                                    if time.monotonic()-last>=10:
+                                        emit('Downloading full recovery: %.1f MB%s'%(received/1048576,(' of %.1f MB'%(total/1048576)) if total else ''));last=time.monotonic()
+                            if total and received!=total:raise OSError('Incomplete recovery download')
+                            return Path(destination)
                     except urllib.error.HTTPError as e:
                         if e.code not in (301,302,303,307,308):raise
                         target=e.headers.get('Location')
                         if not target:raise RuntimeError('Website sent a redirect without a destination (HTTP '+str(e.code)+').') from None
                         current=urllib.parse.urljoin(current,target)
+                        if e.code==303:request_method="GET"
                 raise RuntimeError('Website redirect loop: the backup exceeded five redirects.')
             except urllib.error.HTTPError as e:
                 if e.code in (401,403):raise RuntimeError('Login rejected. Open Settings and enter a current administrator login.') from None
@@ -81,7 +94,25 @@ class Client:
             except (OSError,TimeoutError):
                 if attempt==2:raise RuntimeError('Website connection failed. Check internet and try again.') from None
             time.sleep(2**attempt)
-    def json(self,route): return json.loads(self.get(route))
+    def json(self,route,method="GET"): return json.loads(self.get(route,method=method))
+
+def download_recovery(client,target,emit):
+    deadline=time.monotonic()+2*60*60
+    emit('Starting background recovery — up to two hours allowed for preparation and download.')
+    job=client.json('/api/admin/recovery-jobs',method='POST')
+    job_id=job.get('id','')
+    if not re.fullmatch(r'[a-f0-9-]{36}',job_id):raise ValueError('Website did not return a valid recovery job. The background-backup update must be deployed first.')
+    route='/api/admin/recovery-jobs/'+job_id
+    while True:
+        if time.monotonic()>deadline:raise RuntimeError('Full recovery exceeded its two-hour limit. Previous backups are kept.')
+        if job.get('state')=='ready':
+            emit('Server recovery is ready. Downloading the completed archive…')
+            return client.get(route+'/download',destination=target,deadline=deadline,emit=emit)
+        if job.get('state')=='failed':raise RuntimeError('Server recovery failed: '+str(job.get('error','Unknown error')))
+        if job.get('state')!='preparing':raise ValueError('Unexpected server recovery status: '+str(job.get('state')))
+        emit('Server is preparing recovery: '+str(job.get('progress','Working…')))
+        time.sleep(5)
+        job=client.json(route)
 
 def safe_name(value):
     name=re.sub(r'[<>:"/\\|?*\x00-\x1f]',' ',str(value)).strip(' .')[:90]
@@ -94,6 +125,9 @@ def validate_xlsx(data):
         if '[Content_Types].xml' not in z.namelist() or 'xl/workbook.xml' not in z.namelist(): raise ValueError('Website returned an invalid Excel workbook.')
         if z.testzip(): raise ValueError('Excel workbook is corrupt.')
 
+def file_sha256(path):
+    with Path(path).open('rb') as source:return hashlib.file_digest(source,'sha256').hexdigest()
+
 def recovery_manifest(root):
     root=Path(root)
     required=['server.js','package.json','package-lock.json','data/database.json','data/users.json']
@@ -104,7 +138,7 @@ def recovery_manifest(root):
     files={}
     for p in root.rglob('*'):
         if p.is_symlink(): raise ValueError('Recovery cannot contain symbolic links.')
-        if p.is_file() and p.name!='TTI_RECOVERY_MANIFEST.json': files[p.relative_to(root).as_posix()]=hashlib.sha256(p.read_bytes()).hexdigest()
+        if p.is_file() and p.name!='TTI_RECOVERY_MANIFEST.json': files[p.relative_to(root).as_posix()]=file_sha256(p)
     return {'format':'TTI-BUYERS-RECOVERY-1','created':dt.datetime.now().isoformat(),'files':files,'customers':len(db['customers'])}
 
 def unpack_recovery(data,destination):
@@ -120,7 +154,7 @@ def unpack_recovery(data,destination):
         if result=='..' or result.startswith('../'):
             raise ValueError('Recovery path escapes the backup folder: '+context)
         return result
-    with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') as t:
+    with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') if isinstance(data,bytes) else tarfile.open(name=data,mode='r:gz') as t:
         entries={}
         for m in t.getmembers():
             name=normalize(m.name,m.name)
@@ -185,7 +219,7 @@ def verify_recovery(folder):
     for name,digest in manifest['files'].items():
         p=(folder/name).resolve()
         if not p.is_relative_to(folder.resolve()) or not p.is_file() or p.is_symlink(): raise ValueError('Missing or unsafe file: '+name)
-        if hashlib.sha256(p.read_bytes()).hexdigest()!=digest: raise ValueError('Recovery checksum mismatch: '+name)
+        if file_sha256(p)!=digest: raise ValueError('Recovery checksum mismatch: '+name)
     recovery_manifest(folder)
     return manifest
 
@@ -252,7 +286,7 @@ def run(c,emit=print):
             recovery=None
             if c.get('recovery',True):
                 log('Downloading full software, database, users, cards and settings…')
-                data=client.get('/api/admin/recovery.tar.gz')
+                data=download_recovery(client,stage/'full-recovery.tar.gz',log)
                 recovery=stage/'recovery-content';unpack_recovery(data,recovery)
             # Publish only after ALL requested downloads and validation succeeded.
             for name,_ in paths:atomic(root/name,(stage/name).read_bytes())
