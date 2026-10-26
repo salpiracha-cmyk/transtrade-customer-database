@@ -39,7 +39,7 @@ class RecoveryTests(unittest.TestCase):
   m.write_json(m.APP/'config.json',{'keep':'settings'})
   legacy=m.APP/'buyer_recovery.py';legacy.write_text('old copy');legacy.chmod(0o444)
   c={'hour':15,'minute':30}
-  with patch.object(m,'os',SimpleNamespace(name='nt')), patch.object(m.sys,'executable',str(interpreter)), patch.object(m.subprocess,'check_output',return_value='"testuser","S-1-5-21-test"'), patch.object(m.subprocess,'run',return_value=SimpleNamespace(returncode=0,stderr='')) as call:
+  with patch.object(m,'os',SimpleNamespace(name='nt',getpid=os.getpid,replace=os.replace)), patch.object(m.sys,'executable',str(interpreter)), patch.object(m.subprocess,'check_output',return_value='"testuser","S-1-5-21-test"'), patch.object(m.subprocess,'run',return_value=SimpleNamespace(returncode=0,stderr='')) as call:
    try:m.install(c)
    finally:legacy.chmod(0o666)
   self.assertEqual(legacy.read_text(),'old copy')
