@@ -1,3 +1,4 @@
+import { stageRecovery } from './lib/recovery-export.js';
 import {previewEntries,applyEntries,fingerprint as entryFingerprint} from './lib/audit-entries.js';
 import { isReview, previewReviewPlan, reviewFingerprint } from "./lib/review.js";
 import http from "node:http";
@@ -272,10 +273,12 @@ async function handleApi(req, res, url) {
       let savedEnv=fssync.existsSync(path.join(__dirname,'.env'))?await fs.readFile(path.join(__dirname,'.env'),'utf8'):'';
       const recoveryKeys=['HOST','PORT','APP_USER','APP_PASSWORD','OLLAMA_URL','OLLAMA_VISION_MODEL','OPENAI_API_KEY','OPENAI_MODEL','GEMINI_API_KEY','GEMINI_MODEL','CLAUDE_API_KEY','CLAUDE_MODEL','RESEND_API_KEY','RESEND_FROM_NAME','RESEND_FROM_EMAIL','RESEND_DOMAIN','OUTREACH_SEND_ENABLED','OUTREACH_SEND_GAP_MS','SERVER_EXPORT_DIR'];
       for(const key of recoveryKeys){if(process.env[key]!==undefined){const value=process.env[key];if(/[\r\n]/.test(value))throw Error('Multiline runtime setting cannot be exported: '+key);savedEnv=key+'='+value+'\n'+savedEnv;}}
-      await fs.writeFile(path.join(temp,'.env'),savedEnv+'\n',{mode:0o600});
-      await execFileAsync('tar',['-czf',archive,'--hard-dereference','--exclude=./.git','--exclude=./.env','--exclude=node_modules','--exclude=./outputs','--exclude=./.cache','--exclude=./data/database.backup*','--exclude=./data/database.json.before-*','-C',__dirname,'.','-C',temp,'.env'],{timeout:600000,maxBuffer:1024*1024});
+      const snapshot=path.join(temp,'snapshot');
+      await stageRecovery(__dirname,snapshot);
+      await fs.writeFile(path.join(snapshot,'.env'),savedEnv+'\n',{mode:0o600});
+      await execFileAsync('tar',['-czf',archive,'-C',snapshot,'.'],{timeout:600000,maxBuffer:1024*1024});
       const stat=await fs.stat(archive);
-      res.writeHead(200,{'content-type':'application/gzip','content-length':stat.size,'content-disposition':'attachment; filename="TTI_Buyers_Full_Recovery.tar.gz"','cache-control':'no-store'});
+      res.writeHead(200,{'x-tti-recovery-format':'portable-v2','content-type':'application/gzip','content-length':stat.size,'content-disposition':'attachment; filename="TTI_Buyers_Full_Recovery.tar.gz"','cache-control':'no-store'});
       const stream=fssync.createReadStream(archive);
       stream.on('error',()=>res.destroy());
       res.on('close',()=>{stream.destroy();fs.rm(temp,{recursive:true,force:true}).catch(()=>{});});
