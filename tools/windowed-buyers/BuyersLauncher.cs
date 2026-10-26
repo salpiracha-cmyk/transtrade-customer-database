@@ -3,9 +3,10 @@ using System.IO;
 using System.Diagnostics;
 using System.Windows.Forms;
 using System.Reflection;
+using System.Security.Cryptography;
 [assembly: AssemblyTitle("TTI Buyers Backup and Recovery")]
 [assembly: AssemblyDescription("Opens the readable TTI Python backup application using locally installed Python")]
-[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
 class BuyersLauncher {
  static string Probe(string command) {
   var p = new Process();
@@ -15,14 +16,22 @@ class BuyersLauncher {
  [STAThread] static int Main(string[] args) {
   Application.EnableVisualStyles();
   try {
-   string folder=AppDomain.CurrentDomain.BaseDirectory;
+   string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Transtrade","BuyersWeekly","launcher","1.1.0");
+   Directory.CreateDirectory(folder);
+   foreach(string name in new string[]{"buyer_recovery.py","launch.py"}) {
+    using(var input=Assembly.GetExecutingAssembly().GetManifestResourceStream(name)) {
+     if(input==null) throw new Exception("Installer resource is missing: "+name);
+     using(var memory=new MemoryStream()) {
+      input.CopyTo(memory); byte[] bytes=memory.ToArray(); string target=Path.Combine(folder,name);
+      bool same=File.Exists(target)&&Convert.ToBase64String(File.ReadAllBytes(target))==Convert.ToBase64String(bytes);
+      if(!same) File.WriteAllBytes(target,bytes);
+     }
+    }
+   }
    string script=Path.Combine(folder,"launch.py");
-   if(!File.Exists(script)||!File.Exists(Path.Combine(folder,"buyer_recovery.py"))) throw new Exception("Please extract ALL files from the downloaded ZIP first. Keep the EXE and Python files together, then double-click TTI_Buyers_Backup.exe.");
    string python=Probe("py.exe");
    if(String.IsNullOrEmpty(python)) python=Probe("python.exe");
    if(String.IsNullOrEmpty(python)||!File.Exists(python)) throw new Exception("Python 3.12 or newer was not found. Install Python from python.org with the Python launcher and Tcl/Tk options, then reopen this app.");
-   string windowed=Path.Combine(Path.GetDirectoryName(python),"pythonw.exe");
-   if(File.Exists(windowed)) python=windowed;
    if(args.Length>0 && args[0]=="--self-test") return 0;
    var info=new ProcessStartInfo(python,"\""+script+"\"") { UseShellExecute=false, CreateNoWindow=true, WorkingDirectory=folder, RedirectStandardOutput=true, RedirectStandardError=true };
    using(var p=new Process()) {
