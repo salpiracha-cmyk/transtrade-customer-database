@@ -213,16 +213,17 @@ def install(c):
     if os.name!='nt':raise RuntimeError('Schedule setup requires Windows.')
     if sys.version_info<(3,12):raise RuntimeError('Please install Python 3.12 or newer from python.org.')
     APP.mkdir(parents=True,exist_ok=True)
-    target=APP/'buyer_recovery.py'
-    if Path(__file__).resolve()!=target.resolve():shutil.copy2(__file__,target)
+    source=Path(__file__).read_bytes()
+    version=hashlib.sha256(source).hexdigest()[:16]
+    target=APP/'versions'/version/'buyer_recovery.py'
+    target.parent.mkdir(parents=True,exist_ok=True)
+    if not target.exists() or target.read_bytes()!=source:atomic(target,source)
     interpreter=Path(sys.executable).resolve()
     if interpreter.name.lower()=='python.exe' and interpreter.with_name('pythonw.exe').is_file():
         interpreter=interpreter.with_name('pythonw.exe')
-    launcher=APP/'Open_TTI_Buyers.pyw'
-    launcher.write_text('import runpy\nfrom pathlib import Path\nrunpy.run_path(str(Path(__file__).with_name("buyer_recovery.py")), run_name="__main__")\n',encoding='utf-8')
     import csv
     row=next(csv.reader(subprocess.check_output(['whoami','/user','/fo','csv','/nh'],creationflags=0x08000000,text=True).splitlines()))
-    sid=row[-1].strip();xml=APP/'schedule.xml';xml.write_text(task_xml(interpreter,c,sid,target),encoding='utf-16')
+    sid=row[-1].strip();xml=target.parent/'schedule.xml';xml.write_text(task_xml(interpreter,c,sid,target),encoding='utf-16')
     result=subprocess.run(['schtasks','/Create','/TN',TASK,'/XML',str(xml),'/F'],capture_output=True,text=True,creationflags=0x08000000)
     if result.returncode:raise RuntimeError('Task installation failed: '+result.stderr.strip())
     check=subprocess.run(['schtasks','/Query','/TN',TASK,'/XML'],capture_output=True,text=True,creationflags=0x08000000)
