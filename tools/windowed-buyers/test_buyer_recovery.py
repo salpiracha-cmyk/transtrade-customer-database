@@ -88,6 +88,32 @@ class RecoveryTests(unittest.TestCase):
  def test_circular_links_rejected(self):
   data=self.archive([('a',tarfile.SYMTYPE,'b'),('b',tarfile.SYMTYPE,'a')])
   with self.assertRaisesRegex(ValueError,'Circular'):m.unpack_recovery(data,self.root/'bad-cycle')
+ def client(self):
+  c=m.Client.__new__(m.Client);c.base='https://buyers.example.test';c.auth='Basic test-only';return c
+ def test_same_origin_307_download(self):
+  from unittest.mock import patch,Mock
+  from urllib.error import HTTPError
+  response=io.BytesIO(b'backup bytes');opener=Mock()
+  opener.open.side_effect=[HTTPError('https://buyers.example.test/start',307,'redirect',{'Location':'/download'},None),response]
+  with patch.object(m.urllib.request,'build_opener',return_value=opener):
+   self.assertEqual(self.client().get('/start'),b'backup bytes')
+  self.assertEqual(opener.open.call_args_list[1].args[0].full_url,'https://buyers.example.test/download')
+  self.assertEqual(opener.open.call_args_list[1].args[0].get_header('Authorization'),'Basic test-only')
+ def test_redirect_credentials_cannot_leave_origin(self):
+  from unittest.mock import patch,Mock
+  from urllib.error import HTTPError
+  for target in ['https://other.example.test/path','https://buyers.example.test:444/path','http://buyers.example.test/path','https://user:pass@buyers.example.test/path']:
+   opener=Mock();opener.open.side_effect=HTTPError('https://buyers.example.test/start',307,'redirect',{'Location':target},None)
+   with patch.object(m.urllib.request,'build_opener',return_value=opener):
+    with self.assertRaises(RuntimeError):self.client().get('/start')
+   self.assertEqual(opener.open.call_count,1)
+ def test_redirect_loop_stops(self):
+  from unittest.mock import patch,Mock
+  from urllib.error import HTTPError
+  opener=Mock();opener.open.side_effect=HTTPError('https://buyers.example.test/start',307,'redirect',{'Location':'/start'},None)
+  with patch.object(m.urllib.request,'build_opener',return_value=opener):
+   with self.assertRaisesRegex(RuntimeError,'loop'):self.client().get('/start')
+  self.assertEqual(opener.open.call_count,6)
  @unittest.skipUnless(os.name=='nt','Windows DPAPI')
  def test_windows_credentials_roundtrip(self):self.assertEqual(m.protect(__import__('base64').b64decode(m.protect('test-only-not-a-real-password')),True),'test-only-not-a-real-password')
 
