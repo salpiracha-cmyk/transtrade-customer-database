@@ -112,7 +112,12 @@ def verify_recovery(folder):
     return manifest
 
 def restore_folder(source,target):
-    source=Path(source).resolve(); target=Path(target).resolve(); verify_recovery(source)
+    source=Path(source).resolve(); target=Path(target).resolve()
+    if not (source/'TTI_RECOVERY_MANIFEST.json').is_file():
+        choices=sorted((source/'Recovery'/'Snapshots').glob('*/TTI_RECOVERY_MANIFEST.json'),reverse=True)
+        if not choices: raise ValueError('No full recovery snapshot found in this main folder. Select a dated recovery snapshot or the main buyer-save folder.')
+        source=choices[0].parent
+    verify_recovery(source)
     if target==source or target.is_relative_to(source) or source.is_relative_to(target): raise ValueError('Choose a separate empty destination folder.')
     if target.exists() and any(target.iterdir()): raise ValueError('Destination must be empty. Existing data will never be overwritten.')
     target.mkdir(parents=True,exist_ok=True)
@@ -262,7 +267,7 @@ def gui():
         except Exception as e:messagebox.showerror('Settings',str(e));return
         work(lambda:run(current,emit))
     def restore():
-        source=filedialog.askdirectory(title='Select Recovery snapshot folder (date folder containing manifest)')
+        source=filedialog.askdirectory(title='Select main buyer-save folder or a dated Recovery snapshot')
         if not source:return
         target=filedialog.askdirectory(title='Select EMPTY destination for restored software and data')
         if not target:return
