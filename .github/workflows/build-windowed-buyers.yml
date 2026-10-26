@@ -1,0 +1,76 @@
+name: Build and scan windowed buyers backup
+on:
+  push:
+    paths: ['tools/windowed-buyers/**', '.github/workflows/build-windowed-buyers.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test backup and recovery
+        run: python -m unittest discover -s tools/windowed-buyers -p test_buyer_recovery.py -v
+      - name: Build standard Windows launcher
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /reference:System.Windows.Forms.dll /out:dist\TTI_Buyers_Backup.exe tools\windowed-buyers\BuyersLauncher.cs
+          if ($LASTEXITCODE -ne 0) { throw 'Compilation failed' }
+          Copy-Item tools/windowed-buyers/buyer_recovery.py,tools/windowed-buyers/launch.py,tools/windowed-buyers/README.txt,tools/windowed-buyers/BuyersLauncher.cs dist
+          $p = Start-Process -FilePath dist/TTI_Buyers_Backup.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Launcher test failed' }
+          python -c "import tkinter as t; r=t.Tk(); r.update(); r.destroy()"
+      - name: Test actual Windows schedule registration
+        shell: pwsh
+        run: |
+          @'
+          import sys, pathlib, subprocess, csv
+          sys.path.insert(0,'tools/windowed-buyers')
+          import buyer_recovery as b
+          sid=next(csv.reader(subprocess.check_output(['whoami','/user','/fo','csv','/nh'],text=True).splitlines()))[-1]
+          p=pathlib.Path('test-schedule.xml')
+          p.write_text(b.task_xml(sys.executable,{'hour':15,'minute':30},sid,pathlib.Path('dist/buyer_recovery.py').resolve()),encoding='utf-16')
+          name='TTI Build Schedule Validation'
+          try:
+              subprocess.run(['schtasks','/Create','/TN',name,'/XML',str(p),'/F'],check=True)
+              subprocess.run(['schtasks','/Query','/TN',name,'/XML'],check=True,stdout=subprocess.DEVNULL)
+          finally:
+              subprocess.run(['schtasks','/Delete','/TN',name,'/F'],check=False)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Schedule test failed' }
+      - name: Microsoft Defender scan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $report = 'dist/Defender-scan-report.txt'
+          "Build commit: $env:GITHUB_SHA`nUTC: $([DateTime]::UtcNow.ToString('o'))" | Set-Content $report
+          try {
+            Start-Service WinDefend -ErrorAction SilentlyContinue
+            Update-MpSignature
+            Get-MpComputerStatus | Select-Object AMServiceEnabled,AntivirusEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated | Format-List | Out-String | Add-Content $report
+            $scanner = Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+            if (!$scanner) { $scanner = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" }
+            $before = (Get-FileHash dist/TTI_Buyers_Backup.exe -Algorithm SHA256).Hash
+            & $scanner -Scan -ScanType 3 -File "$env:GITHUB_WORKSPACE\dist" -DisableRemediation 2>&1 | Tee-Object -FilePath scan-output.txt
+            $code = $LASTEXITCODE
+            Get-Content scan-output.txt | Add-Content $report
+            "Scan exit code: $code`nEXE SHA256: $before" | Add-Content $report
+            if ($code -ne 0) { throw 'Defender scan did not return success' }
+            if (!(Test-Path dist/TTI_Buyers_Backup.exe)) { throw 'EXE removed during scan' }
+            if ((Get-FileHash dist/TTI_Buyers_Backup.exe -Algorithm SHA256).Hash -ne $before) { throw 'EXE changed during scan' }
+            'Scan completed; review scanner output above. Not a guarantee for other computers.' | Add-Content $report
+          } catch {
+            "SCAN NOT VERIFIED: $($_.Exception.Message)" | Add-Content $report
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TTI_Buyers_Windowed
+          path: dist/
+          retention-days: 30
