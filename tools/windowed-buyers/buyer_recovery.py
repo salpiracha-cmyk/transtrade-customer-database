@@ -51,18 +51,35 @@ class Client:
         pwd=protect(base64.b64decode(c['secret']),True)
         self.auth='Basic '+base64.b64encode((c['user']+':'+pwd).encode()).decode()
     def get(self,route):
-        req=urllib.request.Request(self.base+route,headers={'Authorization':self.auth,'User-Agent':'TTI-Buyers-Weekly/1.0'})
-        # Never follow a redirect with the login header to another host.
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self,*args,**kwargs): return None
+        def origin(value):
+            parsed=urllib.parse.urlsplit(value)
+            if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:
+                raise RuntimeError('Blocked an unsafe backup redirect. HTTPS without embedded login is required.')
+            return (parsed.hostname.lower(),parsed.port or 443)
+        trusted=origin(self.base)
         for attempt in range(3):
+            current=self.base+route
             try:
-                with urllib.request.build_opener(NoRedirect).open(req,timeout=180) as r: return r.read()
+                for hop in range(6):
+                    if origin(current)!=trusted:
+                        host=urllib.parse.urlsplit(current).hostname
+                        raise RuntimeError('Website redirected the backup to another host ('+str(host)+'). Login was not sent. Please share this error so the hosting redirect can be checked.')
+                    req=urllib.request.Request(current,headers={'Authorization':self.auth,'User-Agent':'TTI-Buyers-Weekly/1.3'})
+                    try:
+                        with urllib.request.build_opener(NoRedirect).open(req,timeout=180) as r:return r.read()
+                    except urllib.error.HTTPError as e:
+                        if e.code not in (301,302,303,307,308):raise
+                        target=e.headers.get('Location')
+                        if not target:raise RuntimeError('Website sent a redirect without a destination (HTTP '+str(e.code)+').') from None
+                        current=urllib.parse.urljoin(current,target)
+                raise RuntimeError('Website redirect loop: the backup exceeded five redirects.')
             except urllib.error.HTTPError as e:
-                if e.code in (401,403): raise RuntimeError('Login rejected. Open Settings and enter a current administrator login.') from None
-                if attempt==2: raise RuntimeError('Website request failed (HTTP '+str(e.code)+').') from None
+                if e.code in (401,403):raise RuntimeError('Login rejected. Open Settings and enter a current administrator login.') from None
+                if attempt==2:raise RuntimeError('Website request failed (HTTP '+str(e.code)+').') from None
             except (OSError,TimeoutError):
-                if attempt==2: raise RuntimeError('Website connection failed. Check internet and try again.') from None
+                if attempt==2:raise RuntimeError('Website connection failed. Check internet and try again.') from None
             time.sleep(2**attempt)
     def json(self,route): return json.loads(self.get(route))
 
