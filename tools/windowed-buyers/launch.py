@@ -12,6 +12,13 @@ def start():
         import tkinter
     except ImportError:
         raise RuntimeError('Python needs Tcl/Tk. Modify your Python installation and enable Tcl/Tk and IDLE.') from None
+    if '--smoke-test' in sys.argv:
+        original=tkinter.Tk
+        def temporary_window(*args,**kwargs):
+            root=original(*args,**kwargs)
+            root.after(700,root.destroy)
+            return root
+        tkinter.Tk=temporary_window
     from buyer_recovery import main
     main()
 
