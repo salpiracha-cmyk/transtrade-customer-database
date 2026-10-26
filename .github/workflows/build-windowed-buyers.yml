@@ -19,9 +19,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /reference:System.Windows.Forms.dll /out:dist\TTI_Buyers_Backup.exe tools\windowed-buyers\BuyersLauncher.cs
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /reference:System.Windows.Forms.dll /resource:tools\windowed-buyers\buyer_recovery.py,buyer_recovery.py /resource:tools\windowed-buyers\launch.py,launch.py /out:dist\TTI_Buyers_Backup.exe tools\windowed-buyers\BuyersLauncher.cs
           if ($LASTEXITCODE -ne 0) { throw 'Compilation failed' }
-          Copy-Item tools/windowed-buyers/buyer_recovery.py,tools/windowed-buyers/launch.py,tools/windowed-buyers/README.txt,tools/windowed-buyers/BuyersLauncher.cs dist
           $p = Start-Process -FilePath dist/TTI_Buyers_Backup.exe -ArgumentList '--self-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'Launcher test failed' }
           python -c "import tkinter as t; r=t.Tk(); r.update(); r.destroy()"
