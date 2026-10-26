@@ -37,19 +37,23 @@ class RecoveryTests(unittest.TestCase):
   from types import SimpleNamespace
   interpreter=self.root/'Python Folder'/'python.exe';interpreter.parent.mkdir();interpreter.touch();interpreter.with_name('pythonw.exe').touch()
   m.write_json(m.APP/'config.json',{'keep':'settings'})
+  legacy=m.APP/'buyer_recovery.py';legacy.write_text('old copy');legacy.chmod(0o444)
   c={'hour':15,'minute':30}
   with patch.object(m,'os',SimpleNamespace(name='nt')), patch.object(m.sys,'executable',str(interpreter)), patch.object(m.subprocess,'check_output',return_value='"testuser","S-1-5-21-test"'), patch.object(m.subprocess,'run',return_value=SimpleNamespace(returncode=0,stderr='')) as call:
-   m.install(c)
-  xml=(m.APP/'schedule.xml').read_text(encoding='utf-16')
+   try:m.install(c)
+   finally:legacy.chmod(0o666)
+  self.assertEqual(legacy.read_text(),'old copy')
+  installed=next((m.APP/'versions').glob('*/buyer_recovery.py'))
+  xml=installed.with_name('schedule.xml').read_text(encoding='utf-16')
   import xml.etree.ElementTree as ET
   # Parse actual bytes: parsing decoded text hides declaration/BOM mismatches.
-  raw=(m.APP/'schedule.xml').read_bytes()
+  raw=installed.with_name('schedule.xml').read_bytes()
   self.assertTrue(raw.startswith((b'\xff\xfe',b'\xfe\xff')))
   self.assertIn("encoding='utf-16'",xml)
   tree=ET.fromstring(raw);ns={'t':'http://schemas.microsoft.com/windows/2004/02/mit/task'}
   self.assertEqual(tree.find('.//t:Command',ns).text,str(interpreter.resolve().with_name('pythonw.exe')))
-  self.assertEqual(tree.find('.//t:Arguments',ns).text,m.subprocess.list2cmdline([str(m.APP/'buyer_recovery.py'),'--scheduled']))
-  self.assertTrue((m.APP/'buyer_recovery.py').is_file());self.assertEqual(m.read_json(m.APP/'config.json'),{'keep':'settings'})
+  self.assertEqual(tree.find('.//t:Arguments',ns).text,m.subprocess.list2cmdline([str(installed),'--scheduled']))
+  self.assertTrue(installed.is_file());self.assertEqual(m.read_json(m.APP/'config.json'),{'keep':'settings'})
   self.assertEqual(call.call_args_list[0].args[0][1],'/Create');self.assertEqual(call.call_args_list[1].args[0][1],'/Query')
  def test_failed_download_preserves_existing_export(self):
   from unittest.mock import patch
