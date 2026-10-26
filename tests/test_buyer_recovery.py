@@ -24,6 +24,10 @@ class RecoveryTests(unittest.TestCase):
    info=tarfile.TarInfo('../outside');info.size=1;t.addfile(info,io.BytesIO(b'x'))
   with self.assertRaises(ValueError):m.unpack_recovery(b.getvalue(),self.root/'bad')
   self.assertFalse((self.root/'outside').exists())
+ def test_main_folder_restores_latest_snapshot(self):
+  import shutil
+  source=self.source();main=self.root/'main';snap=main/'Recovery'/'Snapshots'/'2026-10-26_153000';snap.parent.mkdir(parents=True);shutil.copytree(source,snap)
+  result=m.restore_folder(main,self.root/'from-main');self.assertTrue((result/'data/database.json').exists())
  def test_monday_schedule_and_catchup(self):
   c={'hour':15,'minute':30};self.assertFalse(m.due(c,dt.datetime(2026,10,26,15,29)));self.assertTrue(m.due(c,dt.datetime(2026,10,27,9)))
   m.write_json(m.APP/'status.json',{'successful_week':'2026-10-26'});self.assertFalse(m.due(c,dt.datetime(2026,10,27,9)));self.assertTrue(m.due(c,dt.datetime(2026,11,2,15,30)))
