@@ -263,6 +263,23 @@ function normalizeProviderOrder(value) {
 }
 
 async function handleApi(req, res, url) {
+  if(req.method==='GET' && url.pathname==='/api/admin/recovery.tar.gz'){
+    if(req.user.role!=='admin') return sendJson(res,403,{error:'Administrator access required'});
+    const os=await import('node:os');
+    const temp=await fs.mkdtemp(path.join(os.tmpdir(),'tti-recovery-'));
+    try{
+      const archive=path.join(temp,'buyers-recovery.tar.gz');
+      await execFileAsync('tar',['-czf',archive,'--exclude=./.git','--exclude=./node_modules','--exclude=./outputs','--exclude=./.cache','--exclude=./data/database.backup*','--exclude=./data/database.json.before-*','-C',__dirname,'.'],{timeout:600000,maxBuffer:1024*1024});
+      const stat=await fs.stat(archive);
+      res.writeHead(200,{'content-type':'application/gzip','content-length':stat.size,'content-disposition':'attachment; filename="TTI_Buyers_Full_Recovery.tar.gz"','cache-control':'no-store'});
+      const stream=fssync.createReadStream(archive);
+      stream.on('error',()=>res.destroy());
+      res.on('close',()=>{stream.destroy();fs.rm(temp,{recursive:true,force:true}).catch(()=>{});});
+      stream.pipe(res);
+    }catch(error){await fs.rm(temp,{recursive:true,force:true});throw error;}
+    return;
+  }
+
   if(url.pathname === '/api/admin/audit-entries' && req.method === 'POST'){
     if(req.user.role!=='admin')return sendJson(res,403,{error:'Administrator access required'});
     const body=await readJson(req);
