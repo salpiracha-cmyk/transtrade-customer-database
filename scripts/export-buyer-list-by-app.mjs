@@ -1,3 +1,4 @@
+import { isReview } from "../lib/review.js";
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
@@ -19,8 +20,8 @@ const outputRoot = path.resolve(
   path.join(rootDir, "outputs", "buyer list by APP")
 );
 const active = (db.customers || []).filter((customer) => !customer.archivedAt);
-const buyers = active.filter((customer) => !isMiscellaneousContact(customer));
-const countries = [...new Set(buyers.map((customer) => normalizeCountryName(customer.country)).filter(Boolean))]
+const buyers = active.filter((customer) => !isReview(customer) && !isMiscellaneousContact(customer));
+const countries = [...new Set(buyers.flatMap((customer) => countryMemberships(customer.country)).filter(Boolean))]
   .sort((a, b) => a.localeCompare(b));
 const written = [];
 
@@ -33,7 +34,7 @@ for (const country of countries) {
   const folder = sanitizeFolderName(country);
   const countryDir = path.join(outputRoot, folder);
   await fs.mkdir(countryDir, { recursive: true });
-  const rows = buyers.filter((customer) => normalizeCountryName(customer.country) === country);
+  const rows = buyers.filter((customer) => countryMemberships(customer.country).includes(country));
   const file = path.join(countryDir, `${folder}-buyers-${date}.xlsx`);
   await fs.writeFile(file, await buildXlsx(rows, country));
   written.push(file);
@@ -44,7 +45,7 @@ await fs.writeFile(path.join(outputRoot, "README.txt"), [
   `Updated: ${new Date().toISOString()}`,
   `Active buyer/trader records exported: ${buyers.length}`,
   `Countries exported: ${countries.length}`,
-  "Miscellaneous contacts are excluded from these folders."
+  "Miscellaneous and Review contacts are excluded from these folders."
 ].join("\n") + "\n");
 
 console.log(JSON.stringify({
@@ -187,3 +188,6 @@ function loadLocalEnv(envPath) {
     if (key && process.env[key] === undefined) process.env[key] = value;
   }
 }
+
+
+function countryMemberships(value) { return [...new Set(String(value || '').split(/\s*;\s*|\s+\/\s+/).map(normalizeCountryName).filter(Boolean))]; }

@@ -33,7 +33,7 @@ test('HTTP merge backs up data, rejects stale plans, preserves remarks and serve
     await fs.symlink(new URL('../node_modules',import.meta.url).pathname,path.join(root,'node_modules'),'dir');
     await fs.mkdir(path.join(root,'data'));
     await fs.mkdir(path.join(root,'uploads/cards'),{recursive:true});
-    const customers=[{id:'a',company:'Acme Ltd',country:'Kenya',person:'Ann',email:'ann@acme.test',sourcePhoto:'card_images/one card.png',sourceType:'card_master',sourceTrust:60,notes:'Old: bad@acme.test'},{id:'b',company:'Acme Ltd',country:'Kenya',person:'Ben',email:'ben@acme.test',sourcePhoto:'uploads/cards/two.png',sourceType:'manual',sourceTrust:90,manualCategory:'trader',notes:'Second remark'}];
+    const customers=[{id:'a',company:'Acme Ltd',country:'Kenya',person:'Ann',email:'ann@acme.test',sourcePhoto:'card_images/one card.png',sourceType:'card_master',sourceTrust:60,notes:'Old: bad@acme.test'},{id:'b',company:'Acme Ltd',country:'Kenya',person:'Ben',email:'ben@acme.test',sourcePhoto:'uploads/cards/two.png',sourceType:'manual',sourceTrust:90,manualCategory:'trader',reviewStatus:'pending',reviewReason:'Check original source',notes:'Second remark'}];
     await fs.writeFile(path.join(root,'uploads/cards/one card.png'),'fixture-image');
     await fs.writeFile(path.join(root,'data/database.json'),JSON.stringify({customers,imports:[],events:[],settings:{},suppressions:[],campaigns:[]}));
     child=spawn(process.execPath,['server.js'],{cwd:root,env:{...process.env,PORT:'0',HOST:'127.0.0.1',APP_PASSWORD:'',OUTREACH_SEND_ENABLED:'false'},stdio:['ignore','pipe','pipe']});
@@ -56,6 +56,8 @@ test('HTTP merge backs up data, rejects stale plans, preserves remarks and serve
     assert.ok(active[0].email.includes('ann@acme.test')&&active[0].email.includes('ben@acme.test'));
     assert.ok(active[0].notes.includes('Old: bad@acme.test')&&active[0].notes.includes('Second remark'));
     assert.equal(active[0].manualCategory,'trader');
+    assert.equal(active[0].reviewStatus,'pending');
+    assert.equal(active[0].reviewReason,'Check original source');
     const detail=await (await fetch(base+'/api/customers/'+active[0].id)).json();
     assert.equal(detail.photos.length,2);
     assert.equal(detail.photos.filter(p=>p.available).length,1);
@@ -102,3 +104,4 @@ test('company review includes punctuation and spacing variants without crossing 
   const rows=[{id:'1',company:'Sun Shine General Trading L.L.C.',country:'UAE'},{id:'2',company:'Sunshine General Trading LLC',country:'UAE'},{id:'3',company:'Sunshine General Trading LLC',country:'Oman'}];
   assert.deepEqual(companyGroups(rows).map(g=>g.ids),[['1','2']]);
 });
+

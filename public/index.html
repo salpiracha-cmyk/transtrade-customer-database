@@ -22,7 +22,7 @@
         <button class="nav" data-view="customers">Customers</button>
         <button class="nav" data-view="traders">Traders</button>
         <button class="nav" data-view="companyContacts">Miscellaneous</button>
-        <button class="nav" data-view="research">Research Needed</button>
+        <button class="nav" data-view="research">Review</button>
         <button class="nav" data-view="exports">Clean Exports</button>
         <button class="nav" data-view="import">Import</button>
         <button class="nav" data-view="duplicates">Duplicates</button>
@@ -70,7 +70,7 @@
           <div class="metric"><span>Active customers</span><strong id="mActive">0</strong></div>
           <div class="metric"><span>Clean records</span><strong id="mClean">0</strong></div>
           <div class="metric"><span>Records with email</span><strong id="mEmailReady">0</strong><button id="dataAuditBtn" type="button" class="button secondary">Explain counts</button></div>
-          <div class="metric"><span>Research needed</span><strong id="mResearch">0</strong></div>
+          <div class="metric"><span>In Review</span><strong id="mResearch">0</strong></div>
           <div class="metric"><span>Duplicate groups</span><strong id="mDuplicates">0</strong></div>
         </div>
         <div class="panelGrid">
@@ -153,9 +153,9 @@
           <section class="panel">
             <h2>Cleanup Lists</h2>
             <div class="exportActions">
-              <a class="exportCard" href="/api/export.xlsx?quality=research_needed&category=buyer">
-                <strong>Research needed Excel</strong>
-                <span>Buyer records missing usable contact route or core details.</span>
+              <a class="exportCard" href="/api/export.xlsx?category=review">
+                <strong>Review Excel</strong>
+                <span>Records held outside country lists pending source or contact verification.</span>
               </a>
               <a class="exportCard" href="/api/export.xlsx?contact=no_contact&category=buyer">
                 <strong>No-contact Excel</strong>
@@ -214,19 +214,20 @@
         <section class="panel">
           <div class="panelHeader">
             <div>
-              <h2>Research Needed</h2>
-              <p class="hint inlineHint">Fix incomplete records here. Add an email, mobile, phone, company, or country to move a record back toward the clean lists.</p>
+              <h2>Review</h2>
+              <p class="hint inlineHint">Review records are held outside country buyer lists and outreach. Original country, contacts and cards are preserved. Release a record only after resolving its review reason.</p>
             </div>
             <div class="toolbar compact">
               <input id="researchSearch" placeholder="Search company, country, person" />
               <select id="researchSourceFilter">
                 <option value="">All sources</option>
               </select>
-              <a class="button secondary" href="/api/export.xlsx?quality=research_needed&category=buyer">Export</a>
+              <a class="button secondary" href="/api/export.xlsx?category=review">Export</a>
               <button id="reloadResearchBtn" class="button secondary">Reload</button>
             </div>
           </div>
-          <div id="researchSummary" class="statusBox"></div>
+          <div class="toolbar compact"><input type="file" id="reviewPlanFile" accept=".json" aria-label="Audit move plan" /><button class="button secondary" id="previewReviewPlan">Preview audit moves</button><button class="button" id="applyReviewPlan" disabled>Move matched records to Review</button></div><pre id="reviewPlanSummary" class="statusBox"></pre>
+          <div id="researchSummary" class="statusBox"></div><div class="toolbar compact"><button id="reviewPrevious" class="button secondary">Previous</button><button id="reviewNext" class="button secondary">Next</button></div>
           <div class="tableWrap researchTableWrap">
             <table class="researchTable">
               <thead>
@@ -250,6 +251,12 @@
       <section id="import" class="view">
         <section class="panel narrow">
           <h2>Import Excel or CSV</h2>
+          <h3>Apply audited contact corrections</h3>
+          <label>Audit entry JSON<textarea id="auditEntryJson" aria-label="Audit entry JSON" rows="5"></textarea></label>
+          <button id="previewAuditEntries" type="button" class="button secondary">Preview contact corrections</button>
+          <button id="applyAuditEntries" type="button" class="button" disabled>Apply matching corrections</button>
+          <pre id="auditEntryStatus" role="status"></pre>
+
           <form id="importForm" class="form">
             <label>File <input name="file" type="file" accept=".xlsx,.csv" required /></label>
             <label>Source type
@@ -639,7 +646,7 @@
       </div>
     </div>
     <div id="toast"></div>
-    <script src="/app.js?v=20261026-users-tab" type="module"></script>
+    <script src="/app.js?v=20261026-audit-entries" type="module"></script>
   </body>
 </html>
 

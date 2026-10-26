@@ -1,3 +1,4 @@
+import { isReview } from "../lib/review.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,15 +15,16 @@ const outputPath = path.join(outputDir, `TTI_Sales_Master_Live_Backup_${today}.x
 const db = JSON.parse(await fs.readFile(dbPath, "utf8"));
 const active = (db.customers || []).filter((customer) => !customer.archivedAt);
 const sorted = sortCustomerList(active);
-const buyers = sorted.filter((customer) => !isMiscellaneousContact(customer));
-const miscellaneous = sorted.filter(isMiscellaneousContact);
+const buyers = sorted.filter((customer) => !isReview(customer) && !isMiscellaneousContact(customer));
+const miscellaneous = sorted.filter(c => !isReview(c) && isMiscellaneousContact(c));
 const rows = [
-  ["List Section", "Company", "Person", "Role", "Country", "City", "Phone", "Mobile", "Email", "Website", "Address", "Priority", "Status", "Data Quality", "Source Type", "Source ID", "Source Photo", "Source File", "Source Sheet", "Notes"],
+  ["List Section", "Company", "Person", "Role", "Country", "City", "Phone", "Mobile", "Email", "Website", "Address", "Priority", "Status", "Data Quality", "Source Type", "Source ID", "Source Photo", "Source File", "Source Sheet", "Notes", "Review Reason"],
   ["Potential Buyers"],
   ...buyers.map(exportCustomerRow),
   [],
   ["Miscellaneous"],
-  ...miscellaneous.map(exportCustomerRow)
+  ...miscellaneous.map(exportCustomerRow),
+  [], ["Review"], ...sorted.filter(isReview).map(exportCustomerRow)
 ];
 
 await fs.mkdir(outputDir, { recursive: true });
@@ -33,7 +35,7 @@ console.log(`Master workbook updated: ${outputPath}`);
 
 function exportCustomerRow(c) {
   return [
-    isMiscellaneousContact(c) ? "Miscellaneous" : "Potential Buyer",
+    isReview(c) ? "Review" : isMiscellaneousContact(c) ? "Miscellaneous" : "Potential Buyer",
     c.company || "",
     c.person || "",
     c.role || "",
@@ -52,7 +54,8 @@ function exportCustomerRow(c) {
     c.sourcePhoto || "",
     c.sourceFile || "",
     c.sourceSheet || "",
-    c.notes || ""
+    c.notes || "",
+    c.reviewReason || ""
   ];
 }
 
@@ -139,3 +142,4 @@ function columnName(index) {
 function escapeXml(value) {
   return String(value ?? "").replace(/[<>&"']/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[ch]));
 }
+

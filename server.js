@@ -1,3 +1,5 @@
+import {previewEntries,applyEntries,fingerprint as entryFingerprint} from './lib/audit-entries.js';
+import { isReview, previewReviewPlan, reviewFingerprint } from "./lib/review.js";
 import http from "node:http";
 import fs from "node:fs/promises";
 import fssync from "node:fs";
@@ -261,6 +263,23 @@ function normalizeProviderOrder(value) {
 }
 
 async function handleApi(req, res, url) {
+  if(url.pathname === '/api/admin/audit-entries' && req.method === 'POST'){
+    if(req.user.role!=='admin')return sendJson(res,403,{error:'Administrator access required'});
+    const body=await readJson(req);
+    try{
+      const db=structuredClone(await readDb());
+      const preview=previewEntries(db.customers,body.entries);
+      if(!body.apply)return sendJson(res,200,preview);
+      if(body.fingerprint!==preview.fingerprint)return sendJson(res,409,{error:'Database changed. Preview again.'});
+      const backup=DB_PATH+'.before-audit-'+Date.now()+'.json';
+      await fs.copyFile(DB_PATH,backup);
+      if(entryFingerprint((await readDb()).customers)!==preview.fingerprint)return sendJson(res,409,{error:'Database changed during backup. Preview again.'});
+      applyEntries(db.customers,preview.decisions);
+      db.events.push(event('audit_entries_applied','',{count:preview.ready}));
+      await writeDb(db);
+      return sendJson(res,200,{applied:preview.ready,backupSaved:true,decisions:preview.decisions});
+    }catch(error){return sendJson(res,400,{error:error.message});}
+  }
   if (url.pathname === '/api/account' && req.method === 'GET') return sendJson(res,200,{user:req.user, managed:users.enabled});
   if (url.pathname === '/api/users' || url.pathname === '/api/account') {
     if (!users.enabled) return sendJson(res,400,{error:'Configure APP_PASSWORD on the server before managing users'});
@@ -324,6 +343,28 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/admin/review-plan") {
+    const body = await readJson(req);
+    const db = await readDb();
+    let preview;
+    try { preview = previewReviewPlan(db.customers, body.plan, isMiscellaneousContact); }
+    catch (error) { return sendJson(res, 400, {error:error.message}); }
+    if (!body.apply) return sendJson(res, 200, preview);
+    if (body.fingerprint !== preview.fingerprint) return sendJson(res, 409, {error:"Records changed. Preview again."});
+    const backup = `database.backup-before-review-${Date.now()}.json`;
+    await fs.copyFile(DB_PATH, path.join(path.dirname(DB_PATH), backup));
+    if (reviewFingerprint(JSON.parse(await fs.readFile(DB_PATH, "utf8")).customers) !== preview.fingerprint) return sendJson(res, 409, {error:"Records changed during backup. Preview again."});
+    for (const decision of preview.decisions.filter(d => d.status === "ready")) {
+      const customer = db.customers.find(c => c.id === decision.id);
+      customer.reviewStatus = "pending";
+      customer.reviewReason = decision.reason;
+      customer.updatedAt = now();
+      db.events.push(event("customer_moved_to_review", customer.id, {reason:decision.reason, auditRow:decision.row}));
+    }
+    await writeDb(db);
+    return sendJson(res, 200, {...preview, moved:preview.ready, backup});
+  }
+
   if (req.method === "GET" && url.pathname === "/api/customers") {
     const db = await readDb();
     const country = url.searchParams.get("country");
@@ -336,7 +377,7 @@ async function handleApi(req, res, url) {
     const includeArchived = url.searchParams.get("archived") === "1";
     let customers = db.customers;
     if (!includeArchived) customers = customers.filter((c) => !c.archivedAt);
-    if (country) customers = customers.filter((c) => normalizeCountryName(c.country) === normalizeCountryName(country));
+    if (country) customers = customers.filter((c) => (category === "review" || !isReview(c)) && countryMemberships(c.country).includes(normalizeCountryName(country)));
     if (status) customers = customers.filter((c) => getCustomerStatus(c) === status);
     if (contact) customers = customers.filter((c) => contactMatches(c, contact));
     if (quality) customers = customers.filter((c) => getDataQuality(c) === quality);
@@ -347,7 +388,8 @@ async function handleApi(req, res, url) {
     }
     const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get("limit") || 300)));
     customers = sortCustomerList(customers).map(withCustomerCategory);
-    sendJson(res, 200, { customers: customers.slice(0, limit), total: customers.length, limit });
+    const offset = Math.max(0, Math.trunc(Number(url.searchParams.get("offset") || 0)) || 0);
+    sendJson(res, 200, { customers: customers.slice(offset, offset + limit), total: customers.length, limit, offset });
     return;
   }
 
@@ -1334,13 +1376,13 @@ function isLikelyPersonLine(line, company) {
 
 function buildSummary(db) {
   const active = db.customers.filter((c) => !c.archivedAt);
-  const countries = [...new Set(active.map((c) => normalizeCountryName(c.country)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const countries = [...new Set(active.filter(c => !isReview(c) && !isMiscellaneousContact(c)).flatMap((c) => countryMemberships(c.country)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const sourceTypes = [...new Set(active.map((c) => c.sourceType).filter(Boolean))].sort();
   const ready = active.filter((c) => getDataQuality(c) === "clean");
-  const research = active.filter((c) => getDataQuality(c) === "research_needed");
+  const research = active.filter(isReview);
   const emailReady = active.filter((c) => contactMatches(c, "email"));
   const phoneReady = active.filter((c) => contactMatches(c, "any_phone"));
-  const traders = active.filter((c) => isTraderContact(c));
+  const traders = active.filter((c) => !isReview(c) && isTraderContact(c));
   return {
     totals: {
       active: active.length,
@@ -1363,14 +1405,14 @@ function buildSummary(db) {
 
 function buildOutreachStatus(db) {
   const active = db.customers.filter((c) => !c.archivedAt);
-  const buyers = active.filter((c) => !isMiscellaneousContact(c));
-  const miscellaneous = active.length - buyers.length;
+  const buyers = active.filter((c) => !isReview(c) && !isMiscellaneousContact(c));
+  const miscellaneous = active.filter(c => !isReview(c) && isMiscellaneousContact(c)).length;
   const buyerEmailRecords = buyers.filter((c) => contactMatches(c, "email"));
   const suppressedEmails = new Set((db.suppressions || []).map((item) => normalizeEmail(item.email)).filter(Boolean));
   const eligible = buyerEmailRecords.filter((customer) =>
     splitEmails(customer.email).some((email) => !suppressedEmails.has(normalizeEmail(email)))
   );
-  const countries = [...new Set(eligible.map((c) => normalizeCountryName(c.country)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const countries = [...new Set(eligible.flatMap((c) => countryMemberships(c.country)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return {
     connected: Boolean(RESEND_API_KEY && RESEND_FROM_EMAIL && RESEND_DOMAIN),
     sendingEnabled: Boolean(RESEND_API_KEY),
@@ -1389,6 +1431,7 @@ function buildOutreachStatus(db) {
       active: active.length,
       buyerRecords: buyers.length,
       miscellaneousExcluded: miscellaneous,
+      reviewExcluded: active.filter(isReview).length,
       buyerEmailRecords: buyerEmailRecords.length,
       suppressedEmails: suppressedEmails.size,
       eligibleBuyerEmailRecords: eligible.length,
@@ -1404,8 +1447,8 @@ function getOutreachRecipients(db, { country = "" } = {}) {
   const seen = new Set();
   const recipients = [];
   for (const customer of db.customers || []) {
-    if (customer.archivedAt || isMiscellaneousContact(customer)) continue;
-    if (selectedCountry && normalizeCountryName(customer.country) !== selectedCountry) continue;
+    if (customer.archivedAt || isReview(customer) || isMiscellaneousContact(customer)) continue;
+    if (selectedCountry && !countryMemberships(customer.country).includes(selectedCountry)) continue;
     for (const email of splitEmails(customer.email)) {
       const normalized = normalizeEmail(email);
       if (!normalized || suppressedEmails.has(normalized) || seen.has(normalized)) continue;
@@ -1517,7 +1560,7 @@ async function processOutreachQueue() {
         continue;
       }
       const customer = (db.customers || []).find((c) => c.id === dueItem.customerId);
-      if (!customer || isEmailSuppressed(db, dueItem.to)) {
+      if (!customer || customer.archivedAt || isReview(customer) || isMiscellaneousContact(customer) || isEmailSuppressed(db, dueItem.to)) {
         dueItem.status = "skipped";
         dueItem.skippedAt = now();
         campaign.skipped = (campaign.skipped || 0) + 1;
@@ -1700,6 +1743,7 @@ function getCustomerStatus(c) {
 }
 
 function getDataQuality(c) {
+  if (isReview(c) && !c.archivedAt) return "review";
   if (c.archivedAt) return "archived";
   if (!c.company || !c.country) return "research_needed";
   if (!c.email && !c.mobile && !c.phone) return "research_needed";
@@ -1715,7 +1759,7 @@ function withCustomerCategory(customer) {
   return {
     ...customer,
     country: normalizeCountryName(customer.country),
-    listCategory: miscellaneous ? "Miscellaneous" : trader ? "Traders" : "Potential Buyer"
+    listCategory: isReview(customer) ? "Review" : miscellaneous ? "Miscellaneous" : trader ? "Traders" : "Potential Buyer"
   };
 }
 
@@ -1732,6 +1776,7 @@ function sortCustomerList(customers) {
 }
 
 function customerCategoryRank(customer) {
+  if (isReview(customer)) return 3;
   if (isMiscellaneousContact(customer)) return 2;
   if (isTraderContact(customer)) return 1;
   return 0;
@@ -1848,6 +1893,8 @@ function isValidEmail(value) {
 }
 
 function categoryMatches(c, category) {
+  if (category === "review") return isReview(c);
+  if (isReview(c)) return false;
   if (category === "buyer") return !isMiscellaneousContact(c);
   if (category === "trader" || category === "traders") return !isMiscellaneousContact(c) && isTraderContact(c);
   if (category === "misc" || category === "miscellaneous") return isMiscellaneousContact(c);
@@ -1864,7 +1911,7 @@ function filterCustomers(allCustomers, url) {
   const includeArchived = url.searchParams.get("archived") === "1";
   let customers = allCustomers;
   if (!includeArchived) customers = customers.filter((c) => !c.archivedAt);
-  if (country) customers = customers.filter((c) => normalizeCountryName(c.country) === normalizeCountryName(country));
+  if (country) customers = customers.filter((c) => (category === "review" || !isReview(c)) && countryMemberships(c.country).includes(normalizeCountryName(country)));
   if (status) customers = customers.filter((c) => getCustomerStatus(c) === status);
   if (contact) customers = customers.filter((c) => contactMatches(c, contact));
   if (quality) customers = customers.filter((c) => getDataQuality(c) === quality);
@@ -1884,7 +1931,7 @@ function exportLabel(url) {
 
 function normalizeCustomer(record) {
   const customer = {};
-  for (const key of ["company", "person", "role", "country", "city", "phone", "mobile", "email", "website", "address", "notes", "priority", "manualCategory", "sourceType", "sourceId", "sourcePhoto", "sourceFile", "sourceSheet", "sourceRow"]) {
+  for (const key of ["company", "person", "role", "country", "city", "phone", "mobile", "email", "website", "address", "notes", "priority", "manualCategory", "reviewStatus", "reviewReason", "sourceType", "sourceId", "sourcePhoto", "sourceFile", "sourceSheet", "sourceRow"]) {
     customer[key] = normalizeText(record[key]);
   }
   customer.country = normalizeCountryName(customer.country);
@@ -2375,6 +2422,10 @@ function mergeCustomerFields(primary, customers) {
     output[field] = bestFieldValue(field, primary, customers);
   }
   Object.assign(output, consolidateFields(primary, customers));
+  if (customers.some(isReview)) {
+    output.reviewStatus = "pending";
+    output.reviewReason = [...new Set(customers.filter(isReview).map(c => c.reviewReason).filter(Boolean))].join("; ");
+  }
   if (!primary.manualCategory) output.manualCategory = [...customers].filter(c => c.manualCategory).sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]?.manualCategory || '';
   const notes = customers.map((c) => c.notes).filter(Boolean);
   const sources = customers.map((c) => [c.sourceType, c.sourceFile, c.sourceSheet].filter(Boolean).join(" / ")).filter(Boolean);
@@ -2462,11 +2513,11 @@ function csvRows(text) {
 }
 
 async function buildXlsx(customers, title) {
-  const headers = ["List Section", "Company", "Person", "Role", "Country", "City", "Phone", "Mobile", "Email", "Website", "Address", "Priority", "Status", "Data Quality", "Source Type", "Source ID", "Source Photo", "Notes"];
+  const headers = ["List Section", "Company", "Person", "Role", "Country", "City", "Phone", "Mobile", "Email", "Website", "Address", "Priority", "Status", "Data Quality", "Source Type", "Source ID", "Source Photo", "Notes", "Review Reason"];
   const sorted = sortCustomerList(customers);
-  const buyers = sorted.filter((c) => !isMiscellaneousContact(c) && !isTraderContact(c));
-  const traders = sorted.filter((c) => !isMiscellaneousContact(c) && isTraderContact(c));
-  const miscellaneous = sorted.filter((c) => isMiscellaneousContact(c));
+  const buyers = sorted.filter((c) => !isReview(c) && !isMiscellaneousContact(c) && !isTraderContact(c));
+  const traders = sorted.filter((c) => !isReview(c) && !isMiscellaneousContact(c) && isTraderContact(c));
+  const miscellaneous = sorted.filter((c) => !isReview(c) && isMiscellaneousContact(c));
   const rows = [
     headers,
     ["Potential Buyers"],
@@ -2476,7 +2527,8 @@ async function buildXlsx(customers, title) {
     ...traders.map(exportCustomerRow),
     [],
     ["Miscellaneous"],
-    ...miscellaneous.map(exportCustomerRow)
+    ...miscellaneous.map(exportCustomerRow),
+    [], ["Review"], ...sorted.filter(isReview).map(exportCustomerRow)
   ];
   const zip = new JSZip();
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`);
@@ -2494,7 +2546,7 @@ async function exportBuyerListByApp(db, settings = {}) {
   const masterDir = path.join(root, "master");
   await fs.mkdir(masterDir, { recursive: true });
   const active = (db.customers || []).filter((customer) => !customer.archivedAt);
-  const buyers = active.filter((customer) => !isMiscellaneousContact(customer));
+  const buyers = active.filter((customer) => !isReview(customer) && !isMiscellaneousContact(customer));
   const date = new Date().toISOString().slice(0, 10);
   const written = [];
 
@@ -2502,14 +2554,14 @@ async function exportBuyerListByApp(db, settings = {}) {
   await fs.writeFile(masterPath, await buildXlsx(buyers, "Master Buyers"));
   written.push(masterPath);
 
-  const countries = [...new Set(buyers.map((customer) => normalizeCountryName(customer.country)).filter(Boolean))]
+  const countries = [...new Set(buyers.flatMap((customer) => countryMemberships(customer.country)).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
 
   for (const country of countries) {
     const folderName = sanitizeFolderName(country);
     const countryDir = path.join(root, folderName);
     await fs.mkdir(countryDir, { recursive: true });
-    const countryCustomers = buyers.filter((customer) => normalizeCountryName(customer.country) === country);
+    const countryCustomers = buyers.filter((customer) => countryMemberships(customer.country).includes(country));
     const filePath = path.join(countryDir, `${folderName}-buyers-${date}.xlsx`);
     await fs.writeFile(filePath, await buildXlsx(countryCustomers, country));
     written.push(filePath);
@@ -2560,7 +2612,8 @@ function exportCustomerRow(c) {
     c.sourceType,
     c.sourceId,
     c.sourcePhoto,
-    c.notes
+    c.notes,
+    c.reviewReason || ""
   ];
 }
 
@@ -2615,3 +2668,5 @@ function escapeXml(value) {
   return String(value ?? "").replace(/[<>&'"]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[ch]));
 }
 
+
+function countryMemberships(value) { return [...new Set(String(value || '').split(/\s*;\s*|\s+\/\s+/).map(normalizeCountryName).filter(Boolean))]; }

@@ -18,7 +18,7 @@ const titles = {
   customers: ["Customers", "Search, edit, archive, and export buyer records"],
   traders: ["Traders", "Trading houses and trader portfolio contacts by country"],
   companyContacts: ["Miscellaneous", "Non-buyer contacts excluded from outreach exports"],
-  research: ["Research Needed", "Fix incomplete buyer records before outreach"],
+  research: ["Review", "Held outside country lists and outreach"],
   exports: ["Clean Exports", "Download clean outreach lists and cleanup workbooks"],
   import: ["Import", "Bring in clean Excel lists, verified workbooks, or card master files"],
   duplicates: ["Duplicates", "Review likely repeated customers before merging"],
@@ -284,7 +284,7 @@ async function loadCustomers() {
   const quality = document.getElementById("qualityFilter").value;
   const contact = document.getElementById("contactFilter").value;
   const sourceType = document.getElementById("sourceFilter").value;
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ category: "buyer" });
   if (q) params.set("q", q);
   if (country) params.set("country", country);
   if (status) params.set("status", status);
@@ -314,7 +314,7 @@ async function loadDashboardSearch() {
     const data = await api(`/api/customers?${params}`);
     if (!current()) return;
     state.dashboardSearchCustomers = data.customers;
-    summary.textContent = `${data.total} matching records. Showing ${data.customers.length}.`;
+    summary.textContent = `${data.total} matching records. Showing ${(state.reviewOffset || 0) + 1}–${(state.reviewOffset || 0) + data.customers.length}.`;
     renderCustomerRows(data.customers, "dashboardSearchRows", "No matching records.");
   } catch (error) {
     if (!current()) return;
@@ -335,7 +335,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
   for (const c of customers) {
     const category = c.listCategory || "Potential Buyer";
     if (category !== lastCategory) {
-      rows.push(`<tr class="listSectionRow"><td colspan="9">${escapeHtml(category === "Miscellaneous" ? "Miscellaneous" : category === "Traders" ? "Traders" : "Potential Buyers")}</td></tr>`);
+      rows.push(`<tr class="listSectionRow"><td colspan="9">${escapeHtml(category === "Review" ? "Review" : category === "Miscellaneous" ? "Miscellaneous" : category === "Traders" ? "Traders" : "Potential Buyers")}</td></tr>`);
       lastCategory = category;
     }
     rows.push(`
@@ -354,6 +354,7 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
         <button class="button secondary" data-edit-customer="${escapeHtml(c.id)}">Edit</button>
         <button class="button secondary" data-move-country="${escapeHtml(c.id)}">Move country</button>
         <button class="button secondary" data-move-trader="${escapeHtml(c.id)}">Move to traders</button>
+        <button class="button secondary" data-move-review="${escapeHtml(c.id)}">Move to Review</button>
         <button class="button secondary" data-move-misc="${escapeHtml(c.id)}">Move to misc</button>
       </td>
     </tr>
@@ -375,6 +376,10 @@ function renderCustomerRows(customers, targetId, emptyMessage) {
     });
   });
 
+  body.querySelectorAll("[data-move-review]").forEach(button => button.addEventListener("click", async () => {
+    await api(`/api/customers/${button.dataset.moveReview}`, {method:"PATCH", headers:{"content-type":"application/json"},body:JSON.stringify({reviewStatus:"pending",reviewReason:"Manual review requested"})});
+    await refresh();
+  }));
   body.querySelectorAll("[data-move-misc]").forEach((button) => {
     button.addEventListener("click", async () => {
       await api(`/api/customers/${button.dataset.moveMisc}`, {
@@ -503,6 +508,7 @@ async function loadCompanyContacts() {
   const params = new URLSearchParams({ category: "miscellaneous" });
   if (q) params.set("q", q);
   params.set("limit", "200");
+  params.set("offset", String(state.reviewOffset || 0));
   const data = await api(`/api/customers?${params}`);
   document.getElementById("companyContactsSummary").innerHTML = data.total
     ? `<strong>${data.total}</strong> miscellaneous contacts loaded. These stay out of outreach exports.`
@@ -574,6 +580,7 @@ async function loadTraders() {
   if (q) params.set("q", q);
   if (country) params.set("country", country);
   params.set("limit", "200");
+  params.set("offset", String(state.reviewOffset || 0));
   const data = await api(`/api/customers?${params}`);
   document.getElementById("tradersSummary").innerHTML = data.total
     ? `<strong>${data.total}</strong> trader contacts loaded${country ? ` for ${escapeHtml(country)}` : ""}.`
@@ -636,18 +643,22 @@ async function loadTraders() {
   });
 }
 
-async function loadResearch() {
+async function loadResearch(reset = true) {
+  if (reset !== false) state.reviewOffset = 0;
   const q = document.getElementById("researchSearch").value;
   const sourceType = document.getElementById("researchSourceFilter").value;
-  const params = new URLSearchParams({ quality: "research_needed", category: "buyer" });
+  const params = new URLSearchParams({ category: "review" });
   if (q) params.set("q", q);
   if (sourceType) params.set("sourceType", sourceType);
   params.set("limit", "200");
+  params.set("offset", String(state.reviewOffset || 0));
   const data = await api(`/api/customers?${params}`);
   state.researchCustomers = data.customers;
+  document.getElementById("reviewPrevious").disabled = !state.reviewOffset;
+  document.getElementById("reviewNext").disabled = (state.reviewOffset || 0) + data.customers.length >= data.total;
   document.getElementById("researchSummary").innerHTML = data.total
-    ? `<strong>${data.total}</strong> research-needed records found. Showing ${data.customers.length}.`
-    : `No research-needed records match this filter.`;
+    ? `<strong>${data.total}</strong> Review records found. Showing ${(state.reviewOffset || 0) + 1}–${(state.reviewOffset || 0) + data.customers.length}.`
+    : `No Review records match this filter.`;
   renderResearchRows(data.customers);
 }
 
@@ -663,11 +674,15 @@ function renderResearchRows(customers) {
       <td>${renderResearchEvidence(c)}</td>
       <td><div class="researchNotes">${escapeHtml(c.notes || "") || `<span class="muted">No notes</span>`}</div></td>
       <td class="rowActions">
-        <button class="button secondary" type="button" data-research-edit="${escapeHtml(c.id)}">Edit</button>
+        <button class="button secondary" type="button" data-research-edit="${escapeHtml(c.id)}">Edit</button><button class="button secondary" data-review-release="${escapeHtml(c.id)}">Resolved — return to list</button>
       </td>
     </tr>
   `).join("") : `<tr><td colspan="8" class="muted">No records to research.</td></tr>`;
 
+  el.querySelectorAll("[data-review-release]").forEach(button => button.addEventListener("click", async () => {
+    await api(`/api/customers/${button.dataset.reviewRelease}`, {method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({reviewStatus:"resolved"})});
+    await refresh();
+  }));
   el.querySelectorAll("[data-research-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const customer = state.researchCustomers?.find((c) => c.id === button.dataset.researchEdit);
@@ -847,6 +862,7 @@ async function saveResearchRecord(event) {
 }
 
 function researchReason(c) {
+  if (c.reviewReason) return c.reviewReason;
   const reasons = [];
   if (!c.company) reasons.push("missing company");
   if (!c.country) reasons.push("missing country");
@@ -1637,3 +1653,50 @@ for(const button of document.querySelectorAll('[data-settings-tab]')) {
     for(const tab of document.querySelectorAll('[data-settings-tab]')) tab.setAttribute('aria-selected',String(tab===button));
   });
 }
+
+
+// The uploaded plan only selects unchanged records; it never restores snapshot data.
+let reviewPlanPreview = null;
+document.getElementById("reviewPlanFile").addEventListener("change", () => {
+  reviewPlanPreview = null;
+  document.getElementById("applyReviewPlan").disabled = true;
+});
+document.getElementById("previewReviewPlan").addEventListener("click", async () => {
+  const output = document.getElementById("reviewPlanSummary");
+  reviewPlanPreview = null;
+  document.getElementById("applyReviewPlan").disabled = true;
+  try {
+    const file = document.getElementById("reviewPlanFile").files[0];
+    if (!file) throw new Error("Select the audit move plan JSON first.");
+    const plan = JSON.parse(await file.text());
+    const preview = await api("/api/admin/review-plan", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({plan})});
+    reviewPlanPreview = {plan, fingerprint:preview.fingerprint};
+    const counts = {};
+    preview.decisions.forEach(d => counts[d.status] = (counts[d.status] || 0) + 1);
+    output.textContent = JSON.stringify(counts, null, 2) + "\nUnmatched, changed and ambiguous records remain untouched.";
+    document.getElementById("applyReviewPlan").disabled = !preview.ready;
+  } catch (error) { output.textContent = error.message; }
+});
+document.getElementById("applyReviewPlan").addEventListener("click", async () => {
+  if (!reviewPlanPreview) return;
+  document.getElementById("applyReviewPlan").disabled = true;
+  try {
+    const result = await api("/api/admin/review-plan", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...reviewPlanPreview,apply:true})});
+    reviewPlanPreview = null;
+    document.getElementById("reviewPlanSummary").textContent = `${result.moved} records moved to Review. Backup saved. Preview again to see remaining exceptions.`;
+    await refresh();
+  } catch(error) { document.getElementById("reviewPlanSummary").textContent = error.message + " Preview again before applying."; }
+});
+
+document.getElementById("reviewPrevious").addEventListener("click", () => { state.reviewOffset = Math.max(0, (state.reviewOffset || 0) - 200); loadResearch(false); });
+document.getElementById("reviewNext").addEventListener("click", () => { state.reviewOffset = (state.reviewOffset || 0) + 200; loadResearch(false); });
+let auditEntryPreview=null;
+document.getElementById('auditEntryJson').addEventListener('input',()=>{auditEntryPreview=null;document.getElementById('applyAuditEntries').disabled=true;});
+document.getElementById('previewAuditEntries').addEventListener('click',async()=>{
+ const out=document.getElementById('auditEntryStatus');auditEntryPreview=null;document.getElementById('applyAuditEntries').disabled=true;
+ try{const entries=JSON.parse(document.getElementById('auditEntryJson').value);const p=await api('/api/admin/audit-entries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({entries})});auditEntryPreview={entries,fingerprint:p.fingerprint};const counts={};for(const d of p.decisions)counts[d.status]=(counts[d.status]||0)+1;out.textContent=JSON.stringify(counts,null,2);document.getElementById('applyAuditEntries').disabled=!p.ready;}catch(e){out.textContent=e.message;}
+});
+document.getElementById('applyAuditEntries').addEventListener('click',async()=>{
+ if(!auditEntryPreview)return;document.getElementById('applyAuditEntries').disabled=true;
+ try{const r=await api('/api/admin/audit-entries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...auditEntryPreview,apply:true})});auditEntryPreview=null;document.getElementById('auditEntryStatus').textContent=r.applied+' matching records updated. Backup saved.';await refresh();}catch(e){document.getElementById('auditEntryStatus').textContent=e.message+' Preview again.';}
+});
