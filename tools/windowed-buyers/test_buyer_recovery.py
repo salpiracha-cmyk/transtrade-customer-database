@@ -114,6 +114,34 @@ class RecoveryTests(unittest.TestCase):
   with patch.object(m.urllib.request,'build_opener',return_value=opener):
    with self.assertRaisesRegex(RuntimeError,'loop'):self.client().get('/start')
   self.assertEqual(opener.open.call_count,6)
+ def test_background_recovery_polls_then_downloads(self):
+  from unittest.mock import Mock,patch
+  client=Mock();job_id='11111111-1111-1111-1111-111111111111'
+  client.json.side_effect=[{'id':job_id,'state':'preparing','progress':'Copying files'},{'id':job_id,'state':'ready'}]
+  target=self.root/'archive';client.get.return_value=target
+  with patch.object(m.time,'sleep') as sleep:
+   self.assertEqual(m.download_recovery(client,target,lambda _:None),target)
+  self.assertEqual(sleep.call_args.args,(5,));self.assertEqual(client.json.call_args_list[0].kwargs,{'method':'POST'})
+  self.assertIn('/download',client.get.call_args.args[0]);self.assertEqual(client.get.call_args.kwargs['destination'],target)
+ def test_background_recovery_two_hour_limit(self):
+  from unittest.mock import Mock,patch
+  client=Mock();client.json.return_value={'id':'11111111-1111-1111-1111-111111111111','state':'preparing'}
+  with patch.object(m.time,'monotonic',side_effect=[0,7201]):
+   with self.assertRaisesRegex(RuntimeError,'two-hour'):m.download_recovery(client,self.root/'archive',lambda _:None)
+  client.get.assert_not_called()
+ def test_large_download_streams_to_disk(self):
+  from unittest.mock import Mock,patch
+  payload=b'x'*(3*1024*1024+123)
+  class Response(io.BytesIO):
+   headers={'Content-Length':str(len(payload))}
+   def read(self,size=-1):
+    if size<0:raise AssertionError('Must not load whole archive into memory')
+    return super().read(size)
+  opener=Mock();opener.open.return_value=Response(payload)
+  target=self.root/'archive'
+  with patch.object(m.urllib.request,'build_opener',return_value=opener):
+   self.client().get('/download',destination=target)
+  self.assertEqual(target.read_bytes(),payload)
  @unittest.skipUnless(os.name=='nt','Windows DPAPI')
  def test_windows_credentials_roundtrip(self):self.assertEqual(m.protect(__import__('base64').b64decode(m.protect('test-only-not-a-real-password')),True),'test-only-not-a-real-password')
 
