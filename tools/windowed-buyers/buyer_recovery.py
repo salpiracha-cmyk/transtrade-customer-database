@@ -17,7 +17,7 @@ def atomic(path, data):
 
 def write_json(path,value): atomic(path,json.dumps(value,indent=2).encode())
 def read_json(path,default=None):
-    return json.loads(Path(path).read_text()) if Path(path).exists() else default
+    return json.loads(Path(path).read_text(encoding='utf-8-sig')) if Path(path).exists() else default
 
 def protect(value, decrypt=False):
     if os.name!='nt': raise RuntimeError('Saved credentials require Windows.')
@@ -66,7 +66,7 @@ class Client:
                     if origin(current)!=trusted:
                         host=urllib.parse.urlsplit(current).hostname
                         raise RuntimeError('Website redirected the backup to another host ('+str(host)+'). Login was not sent. Please share this error so the hosting redirect can be checked.')
-                    req=urllib.request.Request(current,data=b'' if request_method=='POST' else None,method=request_method,headers={'Authorization':self.auth,'User-Agent':'TTI-Buyers-Weekly/1.4'})
+                    req=urllib.request.Request(current,data=b'' if request_method=='POST' else None,method=request_method,headers={'Authorization':self.auth,'User-Agent':'TTI-Buyers-Weekly/1.5'})
                     try:
                         with urllib.request.build_opener(NoRedirect).open(req,timeout=180) as r:
                             if destination is None:return r.read()
@@ -226,7 +226,9 @@ def verify_recovery(folder):
 def restore_folder(source,target):
     source=Path(source).resolve(); target=Path(target).resolve()
     if not (source/'TTI_RECOVERY_MANIFEST.json').is_file():
-        choices=sorted((source/'Recovery'/'Snapshots').glob('*/TTI_RECOVERY_MANIFEST.json'),reverse=True)
+        current=source/'Recovery'/'Current'/'TTI_RECOVERY_MANIFEST.json'
+        if not current.is_file():current=source/'Recovery'/'Previous'/'TTI_RECOVERY_MANIFEST.json'
+        choices=[current] if current.is_file() else sorted((source/'Recovery'/'Snapshots').glob('*/TTI_RECOVERY_MANIFEST.json'),reverse=True)
         if not choices: raise ValueError('No full recovery snapshot found in this main folder. Select a dated recovery snapshot or the main buyer-save folder.')
         source=choices[0].parent
     verify_recovery(source)
@@ -235,12 +237,27 @@ def restore_folder(source,target):
     target.mkdir(parents=True,exist_ok=True)
     shutil.copytree(source,target,dirs_exist_ok=True); verify_recovery(target)
     # Prevent old queued campaigns from sending after recovery boot.
-    env=target/'.env'; content=env.read_text() if env.exists() else ''
+    env=target/'.env'; content=env.read_text(encoding='utf-8-sig') if env.exists() else ''
     content=re.sub(r'^OUTREACH_SEND_ENABLED=.*$', 'OUTREACH_SEND_ENABLED=false',content,flags=re.M)
     if not re.search(r'^OUTREACH_SEND_ENABLED=',content,re.M): content+='\nOUTREACH_SEND_ENABLED=false\n'
-    env.write_text(content)
+    env.write_text(content,encoding='utf-8')
     write_json(target/'TTI_RECOVERY_MANIFEST.json',recovery_manifest(target))
     return target
+
+def publish_recovery(staged,root):
+    """Promote a verified folder; retain the last complete generation."""
+    staged=Path(staged); verify_recovery(staged)
+    recovery=Path(root)/'Recovery';recovery.mkdir(parents=True,exist_ok=True)
+    current=recovery/'Current';previous=recovery/'Previous'
+    if current.exists():
+        verify_recovery(current)
+        if previous.exists():shutil.rmtree(previous)
+        os.replace(current,previous)
+    try:os.replace(staged,current)
+    except Exception:
+        if previous.exists() and not current.exists():os.replace(previous,current)
+        raise
+    return current
 
 def due(c,today=None):
     today=today or dt.datetime.now(); monday=today.date()-dt.timedelta(days=today.weekday())
@@ -282,23 +299,26 @@ def run(c,emit=print):
                 names.add(name.casefold());paths.append((name+'/'+name+'.xlsx','/api/export.xlsx?category=buyer&country='+urllib.parse.quote(country)))
             for index,(name,route) in enumerate(paths,1):
                 log('Saving Excel '+str(index)+'/'+str(len(paths))+': '+name)
-                data=client.get(route);validate_xlsx(data);atomic(stage/name,data)
+                data=client.get(route);validate_xlsx(data)
+                target=root/name
+                if target.is_file() and file_sha256(target)==hashlib.sha256(data).hexdigest():
+                    log('Unchanged: '+name)
+                else:
+                    atomic(target,data);log('Updated: '+name)
             recovery=None
             if c.get('recovery',True):
                 log('Downloading full software, database, users, cards and settings…')
                 data=download_recovery(client,stage/'full-recovery.tar.gz',log)
                 recovery=stage/'recovery-content';unpack_recovery(data,recovery)
-            # Publish only after ALL requested downloads and validation succeeded.
-            for name,_ in paths:atomic(root/name,(stage/name).read_bytes())
             if recovery:
-                snapshots=root/'Recovery'/'Snapshots';snapshots.mkdir(parents=True,exist_ok=True)
-                shutil.move(str(recovery),str(snapshots/dt.datetime.now().strftime('%Y-%m-%d_%H%M%S')))
+                publish_recovery(recovery,root)
+                log('Updated Recovery/Current; the previous complete recovery is retained.')
         now=dt.datetime.now();monday=now.date()-dt.timedelta(days=now.weekday())
         write_json(APP/'status.json',{'state':'SUCCESS','time':now.isoformat(),'successful_week':monday.isoformat(),'root':str(root),'files':len(paths),'full_recovery':bool(c.get('recovery'))})
         log('SUCCESS — '+str(len(paths))+' Excel files saved to '+str(root));return True
     except Exception as e:
         previous=read_json(APP/'status.json',{});previous.update(state='FAILED',error=str(e),time=dt.datetime.now().isoformat());write_json(APP/'status.json',previous)
-        log('FAILED — '+str(e));raise
+        log('FAILED — '+str(e));log('Verified Excel updates are kept. Full recovery was not confirmed; use the last verified recovery.');raise
     finally:lock.close()
 
 def task_xml(exe,c,sid,script=None):
@@ -357,7 +377,7 @@ def gui():
         ttk.Entry(form,textvariable=v,show='*' if key=='password' else '',width=66).grid(row=i,column=1,sticky='ew',padx=4,pady=4)
     form.columnconfigure(1,weight=1)
     ttk.Button(form,text='Choose folder…',command=lambda:vars['root'].set(filedialog.askdirectory() or vars['root'].get())).grid(row=0,column=2)
-    full=tk.BooleanVar(value=c.get('recovery',True));ttk.Checkbutton(frame,text='Also save full recovery snapshots (software, all data, cards, users and server settings)',variable=full).pack(anchor='w',pady=8)
+    full=tk.BooleanVar(value=c.get('recovery',True));ttk.Checkbutton(frame,text='Also update Recovery/Current (software, all data, cards, users and server settings)',variable=full).pack(anchor='w',pady=8)
     ttk.Label(frame,text='The PC must be on and this Windows user signed in. Missed Monday jobs catch up at the next sign-in.').pack(anchor='w')
     output=tk.Text(frame,height=13,wrap='word');output.pack(fill='both',expand=True,pady=8);messages=queue.Queue();busy=False
     def emit(t):messages.put(str(t))

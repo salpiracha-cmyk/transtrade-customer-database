@@ -6,7 +6,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 [assembly: AssemblyTitle("TTI Buyers Backup and Recovery")]
 [assembly: AssemblyDescription("Opens the readable TTI Python backup application using locally installed Python")]
-[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
 class BuyersLauncher {
  static string Probe(string command) {
   var p = new Process();
@@ -16,7 +16,7 @@ class BuyersLauncher {
  [STAThread] static int Main(string[] args) {
   Application.EnableVisualStyles();
   try {
-   string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Transtrade","BuyersWeekly","launcher","1.4.0");
+   string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Transtrade","BuyersWeekly","launcher","1.5.0");
    Directory.CreateDirectory(folder);
    foreach(string name in new string[]{"buyer_recovery.py","launch.py"}) {
     using(var input=Assembly.GetExecutingAssembly().GetManifestResourceStream(name)) {

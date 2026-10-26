@@ -142,6 +142,63 @@ class RecoveryTests(unittest.TestCase):
   with patch.object(m.urllib.request,'build_opener',return_value=opener):
    self.client().get('/download',destination=target)
   self.assertEqual(target.read_bytes(),payload)
+ def test_utf8_database_and_settings_roundtrip(self):
+  source=self.source()
+  customer='پاکستان “Buyer”'
+  (source/'data/database.json').write_bytes(json.dumps({'customers':[{'name':customer}]},ensure_ascii=False).encode('utf-8'))
+  (source/'.env').write_bytes(('LABEL='+customer+'\nOUTREACH_SEND_ENABLED=true').encode('utf-8'))
+  m.write_json(source/'TTI_RECOVERY_MANIFEST.json',m.recovery_manifest(source))
+  out=m.restore_folder(source,self.root/'unicode-restored')
+  self.assertEqual(m.read_json(out/'data/database.json')['customers'][0]['name'],customer)
+  self.assertIn(customer,(out/'.env').read_text(encoding='utf-8'))
+ def test_current_folder_updates_and_keeps_previous(self):
+  import shutil
+  source=self.source();main=self.root/'main'
+  m.publish_recovery(source,main)
+  current=main/'Recovery'/'Current'
+  staging=self.root/'second';shutil.copytree(current,staging)
+  (staging/'server.js').write_bytes(b'//new code')
+  m.write_json(staging/'TTI_RECOVERY_MANIFEST.json',m.recovery_manifest(staging))
+  m.publish_recovery(staging,main)
+  self.assertEqual((current/'server.js').read_bytes(),b'//new code')
+  self.assertEqual((main/'Recovery'/'Previous'/'server.js').read_bytes(),b'//code')
+  restored=m.restore_folder(main,self.root/'current-restored')
+  self.assertEqual((restored/'server.js').read_bytes(),b'//new code')
+ def test_invalid_update_preserves_current(self):
+  import shutil
+  source=self.source();main=self.root/'main';m.publish_recovery(source,main)
+  current=main/'Recovery'/'Current';staging=self.root/'invalid';shutil.copytree(current,staging)
+  (staging/'server.js').write_bytes(b'corrupt')
+  with self.assertRaises(ValueError):m.publish_recovery(staging,main)
+  m.verify_recovery(current);self.assertEqual((current/'server.js').read_bytes(),b'//code')
+ def test_promotion_failure_rolls_back(self):
+  from unittest.mock import patch
+  import shutil
+  source=self.source();main=self.root/'main';m.publish_recovery(source,main)
+  current=main/'Recovery'/'Current';staging=self.root/'second';shutil.copytree(current,staging)
+  original=m.os.replace
+  def fail(src,dst):
+   if Path(src)==staging:raise OSError('simulated locked folder')
+   return original(src,dst)
+  with patch.object(m.os,'replace',side_effect=fail):
+   with self.assertRaises(OSError):m.publish_recovery(staging,main)
+  m.verify_recovery(current)
+ def test_completed_excel_is_kept_when_recovery_fails(self):
+  from unittest.mock import patch
+  import zipfile
+  payload=io.BytesIO()
+  with zipfile.ZipFile(payload,'w') as z:
+   z.writestr('[Content_Types].xml','<Types/>');z.writestr('xl/workbook.xml','<workbook/>')
+  data=payload.getvalue()
+  class Client:
+   def __init__(self,c):pass
+   def json(self,route):return {'customers':[{'country':'Pakistan'}],'total':1}
+   def get(self,route):return data
+  out=self.root/'exports'
+  with patch.object(m,'Client',Client),patch.object(m,'download_recovery',side_effect=RuntimeError('failed recovery')):
+   with self.assertRaises(RuntimeError):m.run({'root':str(out),'recovery':True},lambda _:None)
+  self.assertEqual((out/'Main'/'TTI_Customers.xlsx').read_bytes(),data)
+  self.assertEqual(m.read_json(m.APP/'status.json')['state'],'FAILED')
  @unittest.skipUnless(os.name=='nt','Windows DPAPI')
  def test_windows_credentials_roundtrip(self):self.assertEqual(m.protect(__import__('base64').b64decode(m.protect('test-only-not-a-real-password')),True),'test-only-not-a-real-password')
 
